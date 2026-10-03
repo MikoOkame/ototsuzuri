@@ -117,6 +117,7 @@
   - クリップ一覧：idle / takeoff / flying / glide / landing / hop(15F) / hop_big(16F) / hover / turn_L / turn_R / dive_in / dive / peck / sit_in / sit / sit_out / stretch / preen / peer_in / peer / peer_out / alert_in / alert / alert_out / sing / sing_hop / walk / struggle
   - `_in` / ループ / `_out` の3本組（sit・peer・alert）は、入り→ループ→出の順に状態で切り替える。
   - 窓辺で使わないもの：dive_in / dive / struggle / turn_L / turn_R（飛行ゲーム用）。
+- **読み込むテクスチャは `src/tex/tex_bird_番号_id.jpg`（1024×1024、約 80 KB）。** 原本（`assets/bird_mdl/texture/` の 2048 PNG、3〜4 MB）は iPhone で数秒〜十数秒かかり、届く前にマテリアルを作ると黒いまま居座った。鳥はモデルとテクスチャが全部届いてから出す。体のテクスチャに透過は使わない。将来の目パチは目専用の透過 PNG を別マテリアルで重ねる予定（体の形式とは独立）。原本を更新したら `convert 原本 -background white -alpha remove -resize 1024x1024 -quality 86 src/tex/同名.jpg` で作り直す。
 - テクスチャの割り当て（羽結びと同じ方式）：ファイル名 `tex_bird_番号_id` の id で鳥ごとに振り分ける。モデルは共通で、テクスチャだけを差し替える。
 - テクスチャ：`assets/bird_mdl/texture/` の11種。羽結びの鳥たちと同じ個体。当面は仮の3羽でよい（確定）。
 - **輪郭線なし版を使う（確定。不自然なら後から追加）。** `BIRD_VARIANT` で切り替えられる。比較の画像は `shots_stage4/01_cmp_pc.png`。

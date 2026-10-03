@@ -1838,7 +1838,7 @@ const birdTexCache = {};
 // テクスチャは届くまで待つ（届く前にマテリアルを作ると、到着後も黒いままになることがある）
 function birdTex(id){
   if(!birdTexCache[id]){
-    birdTexCache[id] = new THREE.TextureLoader().loadAsync(ASSET_BASE + 'bird_mdl/texture/tex_bird_' + id + '.png')
+    birdTexCache[id] = new THREE.TextureLoader().loadAsync('tex/tex_bird_' + id + '.jpg')   // 1024 の JPEG（原本は assets/。透過は体には不要）
       .then(t=>{ t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; return t; });
   }
   return birdTexCache[id];
