@@ -5,7 +5,7 @@
    ・three.js 0.160。色は srgb() でシェーダーに渡す前提。
    ・羽結びの「水面の動きは触らない」約束は羽結び本体の話。こちらでは自由に調整してよい。
    ・収録：A 依存（配色・srgb・ノイズ・影色） / B 舞台の組み立て / C 空 / D 遠山 / E 海 /
-           F 雲 / G 毎フレームの更新 / H 首の向き / I 音符
+           F 雲 / G 毎フレームの更新 / H 首の向き / I 音符 / J 鳥の声
 */
 
 /* ==================================================================
@@ -554,3 +554,103 @@ function updateNotes(dt, drift){
     sp.material.opacity = Math.min(1, u.life*1.6) * .95;
   }
 }
+
+/* ==================================================================
+   J. 鳥の声（本体 2530–2563, 2649–2681, 2823–2824, 3388–3398行）
+   鳥の声は楽器ではなく、専用の「さえずり」音色 chirp() で鳴らす。
+   ・正弦波が下から音程へしゃくり上がり（style 0）、または上から降りる（style 1：応える側、少し柔らかい）
+   ・7〜9Hz の揺れ（ビブラート）と、1オクターブ上の三角波を薄く重ねる
+   ・長さ約0.26秒、リバーブ送り 0.6
+   ・鳴り終わったら disconnect（web-audio-bgm-design §1）
+   ・voiceCents()：鳥の id から ±30 セントのずれを決め、個体ごとに声の高さを少し変える
+   ・音程は chord()（パッドがその瞬間に保持している和音）の構成音から、72〜93 の範囲で選ぶ。
+     前回の音から ±1〜2 段だけ動かすので、連打すると小さな旋律になる（sing()）。
+   出力先 sfx は BGM とは別のバス。音量の釣り合いはそこで取る。
+================================================================== */
+/* --- 音声の土台（本体 2530–2563行）：init / send / envGain / osc --- */
+const Sound = (()=>{
+  let ctx=null, master=null, bgm=null, sfx=null, rev=null, muted=false, t0=0, gen=0, bgmOn=true;
+  const m2f = m=>440*Math.pow(2,(m-69)/12);
+  const cl = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+  function init(){
+    if(ctx){ if(ctx.state!=='running') ctx.resume(); return; }
+    const C = window.AudioContext||window.webkitAudioContext; if(!C) return;
+    ctx = new C();
+    master = ctx.createGain(); master.gain.value = .6;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value=-12; comp.knee.value=18; comp.ratio.value=6; comp.attack.value=.003; comp.release.value=.25;
+    master.connect(comp); comp.connect(ctx.destination);
+    bgm = ctx.createGain(); bgm.gain.value = bgmOn ? .75 : 0; bgm.connect(master);
+    sfx = ctx.createGain(); sfx.gain.value = 1.0; sfx.connect(master);
+    rev = ctx.createConvolver();
+    const len = Math.floor(ctx.sampleRate*2.8), ir = ctx.createBuffer(2,len,ctx.sampleRate);
+    for(let c=0;c<2;c++){ const d=ir.getChannelData(c); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6); }
+    rev.buffer = ir;
+    const wet = ctx.createGain(); wet.gain.value = .22; rev.connect(wet); wet.connect(master);
+  }
+  const sends = {};
+  function send(g, amt){
+    if(!sends[amt]){ sends[amt]=ctx.createGain(); sends[amt].gain.value=amt; sends[amt].connect(rev); }
+    g.connect(sends[amt]);
+  }
+  function envGain(t, peak, att, rel, out, rv){
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(.0001,t);
+    g.gain.exponentialRampToValueAtTime(peak,t+att);
+    g.gain.exponentialRampToValueAtTime(.0001,t+att+rel);
+    g.connect(out); send(g, rv); return g;
+  }
+  function osc(type,f,t,stop){ const o=ctx.createOscillator(); o.type=type; o.frequency.value=f; o.start(t); o.stop(stop); return o; }
+
+/* --- 和音と声（本体 2649–2681行） --- */
+  /* the chord the pad is holding right now, so a sung note always fits */
+  function chord(){
+    if(!ctx) return [65,69,72];
+    const S = track.song, L = S.loopSec;
+    const lt = ((ctx.currentTime - t0) % L + L) % L;
+    let on = S.pad.filter(([t,,d])=>lt>=t && lt<t+d).map(e=>e[1]);
+    if(!on.length){ const last = S.pad.filter(([t])=>t<=lt).pop() || S.pad[0]; on = S.pad.filter(e=>e[0]===last[0]).map(e=>e[1]); }
+    return on;
+  }
+
+  /* a bird's call: a whistle that swoops up into the pitch.
+     style 0 = the player, 1 = a mate answering (swoops down, a little softer) */
+  function chirp(m, vol=1, pan=0, style=0, cents=0){
+    if(!ctx || vol<=.01) return;
+    const t = ctx.currentTime + .005, f = m2f(m)*Math.pow(2, cents/1200);
+    const out = ctx.createGain(); out.gain.value = vol;
+    let node = out;
+    if(ctx.createStereoPanner){ const p=ctx.createStereoPanner(); p.pan.value=cl(pan,-1,1); out.connect(p); node=p; }
+    node.connect(sfx);
+    const dur = .26;
+    const g = envGain(t, .22, .012, dur, out, .6);
+    const a = ctx.createOscillator(); a.type='sine';
+    a.frequency.setValueAtTime(f*(style? 1.12 : .82), t);
+    a.frequency.exponentialRampToValueAtTime(f*(style? .99 : 1.015), t+.05);
+    a.frequency.exponentialRampToValueAtTime(f, t+.09);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = style? 9 : 7;
+    const lg = ctx.createGain(); lg.gain.value = f*.012; lfo.connect(lg); lg.connect(a.frequency);
+    const b = ctx.createOscillator(); b.type='triangle'; b.frequency.value = f*2;
+    const g2 = ctx.createGain(); g2.gain.value = style? .05 : .08; b.connect(g2); g2.connect(g);
+    a.connect(g);
+    const stop = t+dur+.06;
+    for(const o of [a,b,lfo]){ o.start(t); o.stop(stop); }
+    a.onended = ()=>{ g.disconnect(); out.disconnect(); };
+
+/* --- 個体ごとの声の高さ（本体 2823–2824行） --- */
+// each bird's voice sits a little higher or lower, so they can be told apart
+function voiceCents(def){ let h=0; for(const c of (def.id||'')) h=(h*31+c.charCodeAt(0))%997; return (h%61)-30; }
+
+/* --- 歌うときの音程の選び方（本体 3388–3398行の抜粋） --- */
+  Sound.init();
+  // walk through the current chord so taps make a little tune
+  const pool = [];
+  for(const n of Sound.chord()) for(let m=n; m<=93; m+=12) if(m>=72) pool.push(m);
+  pool.sort((a,b)=>a-b);
+  let i = pool.findIndex(m=>m>=lastPitch); if(i<0) i = pool.length-1;
+  i = THREE.MathUtils.clamp(i + [-2,-1,-1,1,1,2][Math.floor(Math.random()*6)], 0, pool.length-1);
+  const midi = pool[i]; lastPitch = midi;
+  Sound.chirp(midi, 1, 0, 0, voiceCents(leadDef()));
+  if(head){ head.getWorldPosition(_h); _h.y += .35; } else _h.copy(bird.position).y += 1;
+  emitNote(_h, midi);
