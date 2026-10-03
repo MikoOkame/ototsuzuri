@@ -276,6 +276,7 @@ function onOff(t, a, b, c, d){
 }
 const lampsOn   = t => onOff(t, .63, .70, .05, .10);   // 街灯・灯台・ランタン・小舟
 const roomOn    = t => onOff(t, .58, .62, .79, .81);   // 室内の照明。家主は早寝
+const birdNight = t => onOff(t, .80, .83, .06, .09);   // 鳥が座って休む時間。完全に夜になってから朝まで
 function litFrac(t){                                   // 町の窓明かりの割合
   if(t < .04) return .12;
   if(t < .10) return .12*(1 - sstep(.04, .10, t));
@@ -1001,7 +1002,7 @@ gb.position.y = .1;
 guide.add(gb);
 
 /* 窓台の小物：鉢植えと小瓶。カーテンに掛からない内側に置く */
-const POT_X = -.72, BOTTLE_X = .74, SMALL_Z = -.14;
+const POT_X = -1.05, BOTTLE_X = .98, SMALL_Z = -.2;   // 両端寄り（手すりの鳥の尾羽と重ならない）
 const pot = new THREE.Mesh(new THREE.CylinderGeometry(.075,.058,.13,16), inToon(0xc58f7c));
 pot.position.set(POT_X, SILL_TOP + .065, SMALL_Z); scene.add(pot); addOutline(pot, .01, OUT_IN);
 const leafMat = inToon(0x8fb59c);
@@ -1315,6 +1316,42 @@ function stopAllAudio(){
   updatePlayBtn();
 }
 
+/* ---- 鳥の声（羽結び J節の chirp をそのまま）----
+   BGM とは別のバス sfxGain に出す。音量は SFX_LEVEL × 全体の音量。 */
+let sfxGain = null;
+const SFX_LEVEL = .9;
+function ensureSfx(){
+  if(sfxGain || !audioCtx) return;
+  sfxGain = audioCtx.createGain(); sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL;
+  sfxGain.connect(masterCompressor);
+}
+// 個体ごとの声の高さ：id から ±30 セントのずれ
+function voiceCents(id){ let h = 0; for(const c of (id||'')) h = (h*31 + c.charCodeAt(0))%997; return (h%61) - 30; }
+// さえずり：正弦波が音程へしゃくり上がる（style 0）か、上から降りる（style 1：応える側）
+function chirp(m, vol=1, style=0, cents=0){
+  const ctx = ensureAudioCtx(); if(!ctx || vol <= .01) return;
+  ensureSfx();
+  const t = ctx.currentTime + .005, f = midiToFreq(m)*Math.pow(2, cents/1200), dur = .26;
+  const out = ctx.createGain(); out.gain.value = vol; out.connect(sfxGain);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(.0001, t);
+  g.gain.exponentialRampToValueAtTime(.22, t+.012);
+  g.gain.exponentialRampToValueAtTime(.0001, t+.012+dur);
+  g.connect(out); sendToReverb(g, .6);
+  const a = trackNode(ctx.createOscillator()); a.type = 'sine';
+  a.frequency.setValueAtTime(f*(style ? 1.12 : .82), t);
+  a.frequency.exponentialRampToValueAtTime(f*(style ? .99 : 1.015), t+.05);
+  a.frequency.exponentialRampToValueAtTime(f, t+.09);
+  const lfo = trackNode(ctx.createOscillator()); lfo.frequency.value = style ? 9 : 7;
+  const lg = ctx.createGain(); lg.gain.value = f*.012; lfo.connect(lg); lg.connect(a.frequency);
+  const b = trackNode(ctx.createOscillator()); b.type = 'triangle'; b.frequency.value = f*2;
+  const g2 = ctx.createGain(); g2.gain.value = style ? .05 : .08; b.connect(g2); g2.connect(g);
+  a.connect(g);
+  const stop = t+dur+.06;
+  for(const o of [a,b,lfo]){ o.start(t); o.stop(stop); }
+  a.addEventListener('ended', ()=>{ g.disconnect(); g2.disconnect(); lg.disconnect(); out.disconnect(); });
+}
+
 /* ---- 先読みスケジューラ（回転速度に追従） ----
    25ms ごとに起き、曲の位置 song.pos を audio の時計 × speed で進める。
    予約するのは「曲の位置が pos + 先読み秒×speed までのノート」。
@@ -1408,8 +1445,8 @@ function togglePlay(){ if(isPlaying) stopAllAudio(); else playTrack(currentTrack
 function nextTrack(){ playTrack((currentTrackIdx+1) % TRACKS.length); }
 function prevTrack(){ playTrack((currentTrackIdx-1+TRACKS.length) % TRACKS.length); }
 function windDown(){ if(isPlaying && !song.winding){ song.winding = true; song.windT = 0; } }
-function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; }
-function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊'); }
+function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
+function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊'); }
 function cyclePlayMode(){
   playMode = playMode === 'single' ? 'all' : (playMode === 'all' ? 'shuffle' : 'single');
   updateModeBtn();
@@ -1824,9 +1861,9 @@ function makeBird(texId, idx){
   let neck = null, head = null;
   model.traverse(o=>{ if(!neck && o.name === 'neck') neck = o; if(!head && o.name === 'head') head = o; });
   // 音域：鳥ごとに1オクターブずつ分ける（触れて鳴らす音）
-  const RANGES = [[60,72],[67,79],[74,86]];
+  const RANGES = [[72,84],[76,88],[81,93]];   // さえずりは高め。羽結びの 72〜93 を3羽で分ける
   const bird = { model, mixer, clips, body, neck, head, neckClip:new THREE.Quaternion(), headClip:new THREE.Quaternion(),
-    current:null, state:'', wait:0, night:false, idx, range:RANGES[idx % 3],
+    current:null, state:'', wait:0, night:false, idx, range:RANGES[idx % 3], id:texId.slice(3), cents:voiceCents(texId.slice(3)),
     yaw:0, pitch:0, tilt:0, tiltT:0, lookAt:null, lookT:0, sing:false, singBeat:-1, touchT:0 };
   // 当たり判定：見た目より大きい球
   const hit = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 6), new THREE.MeshBasicMaterial({ visible:false }));
@@ -1848,7 +1885,7 @@ function makeBird(texId, idx){
 const DAY_ACTS = [['peck',1.5],['stretch',3],['preen',2.6],['hop',.5],['peer_in',.5]];
 function birdThink(b, dt){
   b.wait -= dt;
-  const night = lampsOn(dayT) > .5;
+  const night = birdNight(dayT) > .5;
   if(night !== b.night){
     b.night = night;
     if(night){ b.state = 'sit_in'; b.play('sit_in', false); b.wait = .65; }
@@ -1909,10 +1946,10 @@ function birdNeck(b, dt){
     boneTurn(b.model, b.head, M_Z, b.tilt);
   }
 }
-const _beak = new THREE.Vector3();
+const _beak = new THREE.Vector3(), _fw = new THREE.Vector3();
 function beakPos(b, out){
-  if(b.head){ b.head.getWorldPosition(out); return out.addScaledVector(_beak.set(0,0,1).applyQuaternion(_mw.copy(b.model.quaternion)), .045).add(_beak.set(0,.01,0)); }
-  return b.model.getWorldPosition(out).add(_beak.set(0,.2,.1));
+  if(b.head){ b.head.getWorldPosition(out); _fw.set(0,0,1).applyQuaternion(b.model.quaternion); return out.addScaledVector(_fw, .06).add(_fw.set(0,.07,0)); }
+  return b.model.getWorldPosition(out).add(_fw.set(0,.26,.1));
 }
 
 /* ---- 歌：再生中は1羽ずつ交代で歌う。体の揺れを拍に同期させる（再生位置を拍から計算して上書き） ---- */
@@ -1938,6 +1975,7 @@ function updateSinging(dt){
   if(bi !== b.singBeat){
     b.singBeat = bi;
     const midi = chordNote(b.range);
+    chirp(midi, .7, 1, b.cents);   // 歌は応える側の声（上から降りる、少し柔らかい）
     emitNote(beakPos(b, _beak), midi, .7);
   }
 }
@@ -1954,7 +1992,7 @@ function chordNote(range){
 function touchBird(b, point){
   const ctx = ensureAudioCtx(); if(ctx && ctx.state === 'suspended') ctx.resume();
   const midi = chordNote(b.range);
-  if(ctx){ const fn = INSTRUMENTS[trackInstruments(song.track).melody] || INSTRUMENTS.musicbox; fn(ctx.currentTime, midi, .6, 84); }
+  chirp(midi, 1, 0, b.cents);
   emitNote(beakPos(b, _beak), midi, 1);
   b.lookAt = point.clone(); b.lookT = 1.6;
   b.state = 'touched'; b.play(b.night ? 'hop' : (Math.random() < .5 ? 'hop' : 'hop_big'), false); b.wait = .6;
@@ -1973,11 +2011,11 @@ async function loadBirds(){
   birdSrc[BIRD_VARIANT] = await loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]);
   // 仮の3羽：手すりの上に2羽、窓台の端に1羽。オルゴールの方を向く
   // モデルの正面は +z。rotation.y = 0 で部屋（カメラ）の方を向く
-  const a = makeBird('01_shiro', 0); a.model.position.set(-.75, RAIL_TOP + .035, RAIL_Z); a.model.rotation.y = .35;
-  const b = makeBird('03_momo', 1);  b.model.position.set(.55, RAIL_TOP + .035, RAIL_Z);  b.model.rotation.y = -.35;
-  const c = makeBird('06_sora', 2);  c.model.position.set(.52, SILL_TOP, .2);             c.model.rotation.y = -Math.PI/2;   // カーテン（x≥.875）に掛からない位置
+  const a = makeBird('01_shiro', 0); a.model.position.set(-.42, RAIL_TOP + .035, RAIL_Z); a.model.rotation.y = .3;
+  const b = makeBird('03_momo', 1);  b.model.position.set(.42, RAIL_TOP + .035, RAIL_Z);  b.model.rotation.y = -.3;
+  const c = makeBird('06_sora', 2);  c.model.position.set(.52, SILL_TOP, .2);             c.model.rotation.y = -Math.PI/4;   // 体は斜め45°。カーテン（x≥.875）に掛からない位置
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.model.position).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
-  for(const bd of birds){ bd.night = lampsOn(dayT) > .5; bd.state = bd.night ? 'sit' : 'idle'; bd.play(bd.state); bd.wait = Math.random()*3; }
+  for(const bd of birds){ bd.night = birdNight(dayT) > .5; bd.state = bd.night ? 'sit' : 'idle'; bd.play(bd.state); bd.wait = Math.random()*3; }
 }
 loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
 
