@@ -624,7 +624,8 @@ const seaMat = new THREE.ShaderMaterial({
       vec2 q=p+8.*vec2(fbm3(p*.02+vec2(t*.05,0.)), fbm3(p*.02+vec2(0.,-t*.04)));
       float big=fbm3(q*.005+vec2(t*.012,0.));
       float mid=fbm(q*.022+vec2(t*.02,t*.03));
-      vec3 col=mix(uDeep,uLight,smoothstep(.3,.72,big));
+      // 静かな海では濃淡の境を広くとって、斑でなく緩い濃淡にする
+      vec3 col=mix(uDeep,uLight,smoothstep(mix(.3,.15,uCalm),mix(.72,.9,uCalm),big));
       // 中くらいの模様（顔料の溜まり・明るい斑）。見下ろすと汚れに見えるので静かな海では消す
       float midK=1.-uCalm*.9;
       float edge=1.-smoothstep(0.,.035,abs(mid-.52));
@@ -638,7 +639,7 @@ const seaMat = new THREE.ShaderMaterial({
 
       vec3 w=waves(mix(p,q,.7),uT);
       float gust=mix(.3,1.35,smoothstep(.28,.72,fbm3(q*.011+vec2(-t*.03,t*.02))));
-      vec2 gsum=w.xy*1.6*gust*.8*(1.-uCalm*.75);
+      vec2 gsum=w.xy*1.6*gust*.8*(1.-uCalm);
       vec2 cg=vec2(0.);
       if(near>0. && uCalm<.99){
         vec2 E[3]; E[0]=vec2(.94,.34); E[1]=vec2(-.6,.8); E[2]=vec2(.1,-1.);
@@ -1803,7 +1804,7 @@ async function loadBirds(){
   // 仮の3羽：手すりの上に2羽、窓台の端に1羽。オルゴールの方を向く
   const a = makeBird('01_shiro'); a.model.position.set(-.75, RAIL_TOP + .035, RAIL_Z); a.model.rotation.y = Math.PI*.8;
   const b = makeBird('03_momo');  b.model.position.set(.55, RAIL_TOP + .035, RAIL_Z);  b.model.rotation.y = -Math.PI*.8;
-  const c = makeBird('06_sora');  c.model.position.set(.95, SILL_TOP, .12);            c.model.rotation.y = -Math.PI*.6;
+  const c = makeBird('06_sora');  c.model.position.set(.52, SILL_TOP, .2);             c.model.rotation.y = -Math.PI*.6;   // カーテン（x≥.875）に掛からない位置
   for(const bd of birds){ bd.night = lampsOn(dayT) > .5; bd.state = bd.night ? 'sit' : 'idle'; bd.play(bd.state); bd.wait = Math.random()*3; }
 }
 loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
