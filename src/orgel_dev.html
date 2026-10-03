@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>音綴り - OtoTsuzuri -</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    box-sizing:border-box;
+    --bg:#141238; --ink:#fff4dc; --ink-dim:rgba(255,244,220,.7);
+    --panel:rgba(30,24,58,.5); --line:rgba(255,228,196,.28);
+    --accent:#ffd494; --accent-ink:#3a2a30;
+  }
+  *,*::before,*::after{ box-sizing:inherit; }
+  html{ height:100%; }
+  body{
+    margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
+    font-family:'Zen Maru Gothic',"Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif;
+    touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  #c{ position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
+  #paper{
+    position:fixed; inset:0; pointer-events:none; opacity:.32; mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .52  0 0 0 0 .47  0 0 0 0 .44  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  #vignette{
+    position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(18,12,38,.42) 100%);
+  }
+  #tag{ position:fixed; top:0; left:0; padding:calc(16px + env(safe-area-inset-top,0px)) 20px 0; pointer-events:none; }
+  #tag h1{ margin:0; font-size:19px; font-weight:700; letter-spacing:.1em; text-shadow:0 1px 10px rgba(20,10,40,.5); }
+  #tag h1 span{ font-size:12px; font-weight:500; letter-spacing:.06em; color:var(--ink-dim); margin-left:.4em; }
+  #hint{
+    position:fixed; left:0; right:0; bottom:calc(28px + env(safe-area-inset-bottom,0px));
+    margin:0; text-align:center; font-size:12px; color:var(--ink-dim); letter-spacing:.08em;
+    pointer-events:none; transition:opacity 1.2s;
+  }
+  /* デバッグ表示（?debug のときだけ出す） */
+  #dbg{
+    display:none; position:fixed; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    padding:8px 10px; border-radius:12px; background:var(--panel); border:1px solid var(--line);
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); font-size:12px;
+  }
+  #dbg.on{ display:block; }
+  #dbg .row{ display:flex; align-items:center; gap:8px; margin:4px 0; }
+  #dbg input[type=range]{ flex:1; }
+  #dbg button{
+    font-family:inherit; font-size:12px; color:var(--ink); background:transparent;
+    border:1px solid var(--line); border-radius:999px; padding:4px 10px; cursor:pointer;
+  }
+  #dbg button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
+  #dbg #tLabel{ min-width:9em; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="海辺の町を見下ろす窓辺の風景"></canvas>
+<div id="paper"></div>
+<div id="vignette"></div>
+
+<header id="tag">
+  <h1>音綴り<span>- OtoTsuzuri -</span></h1>
+</header>
+<p id="hint">ドラッグで見まわす</p>
+
+<div id="dbg">
+  <div class="row"><span id="tLabel">-</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row">
+    <span>速さ</span>
+    <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
+    <button id="spotBtn" aria-pressed="false">置き場所</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script>
+  window.__err = null;
+  window.addEventListener('error', e=>{ window.__err = (window.__err||'') + e.message + '\n'; });
+  window.addEventListener('unhandledrejection', e=>{ window.__err = (window.__err||'') + String(e.reason) + '\n'; });
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MOTION = reduceMotion ? 0.25 : 1;
+const PARAMS = new URLSearchParams(location.search);
+
+/* ================================================================
+   一日の時計
+   dayT：0 が真夜中、1 で一周。一日の長さは DAY_LEN 秒（ここだけで変える）。
+   ?t=0.66 で時刻を固定、?speed=60 で早送り、?debug でスライダーを出す。
+================================================================ */
+const DAY_LEN = 720;                 // 一日 = 12 分
+const DAY_START = 0.62;              // 開いたときは夕方
+const SUNRISE = 0.08, SUNSET = 0.70; // 太陽が水平線を越える時刻
+const MOONRISE = 0.74, MOONSET = 1.06;   // 月（翌朝 0.06 に沈む）
+const MOON_CYCLE_DAYS = 30;          // 満ち欠けの一周り（ゲーム内の日数。実時間で6時間）
+let dayT = PARAMS.has('t') ? parseFloat(PARAMS.get('t')) : DAY_START;
+let dayCount = 0;                    // 経過した日数（満ち欠け用）
+let timeSpeed = PARAMS.has('t') ? 0 : (parseFloat(PARAMS.get('speed')) || 1);
+
+/* ---------- 乱数（毎回同じ町並みになるよう固定シード） ---------- */
+let seed = 20260924;
+function rnd(){
+  seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+  let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296;
+}
+function pick(a){ return a[Math.floor(rnd()*a.length)]; }
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const sstep = (a, b, x) => { const t = clamp01((x - a)/(b - a)); return t*t*(3 - 2*t); };
+
+/* ---------- レンダラ ---------- */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+renderer.setPixelRatio(DPR);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x34325f, 40, 420);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 4000);
+
+/* ---------- 色の受け渡し ---------- */
+// 自前シェーダーは色空間の変換を通らないので、sRGB の値にして渡す
+function srgb(hex){ const c = new THREE.Color(hex); c.convertLinearToSRGB(); return new THREE.Vector3(c.r, c.g, c.b); }
+function toSrgb(v, c){ const s = c.clone().convertLinearToSRGB(); v.set(s.r, s.g, s.b); return v; }
+
+const GLSL_NOISE = `
+float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+float noise(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+1.),f.x), f.y);
+}
+float fbm(vec2 p){ float v=0., a=.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.03+17.; a*=.5; } return v; }
+float fbm3(vec2 p){ float v=0., a=.5; for(int i=0;i<3;i++){ v+=a*noise(p); p=p*2.03+17.; a*=.5; } return v*1.107; }
+`;
+
+/* ================================================================
+   配色：夜明け・朝・昼・夕方・夜 の5つを基準点にして補間する
+   昼は羽結び（一日目・海渡り）の配色を下敷きにしている。
+================================================================ */
+const KEYS = [
+  { t:.07, name:'夜明け',
+    skyTop:0x5a6aa8, skyBot:0xf1c9b4, glow:0xffb98a, fog:0xd9c9c9,
+    seaDeep:0x4f6893, seaLight:0xa8b4c8, hills:[0x8f9ab8,0x74809f,0x5e6a8a], cloud:0xe8c9c6,
+    hemiSky:0xc9c7de, hemiGround:0x6a6480, hemiI:1.2, sunColor:0xffd3b0, sunI:1.0,
+    stars:.25, inLight:0x6c6a80, ground:0x7a7693, island:0x777aa0, glass:0x9ca6c8 },
+  { t:.18, name:'朝',
+    skyTop:0x7fa8d8, skyBot:0xf3e4cf, glow:0xfff0cc, fog:0xe6e1d2,
+    seaDeep:0x6f9fae, seaLight:0xbfd5cf, hills:[0xb7c6c4,0x9bb0b0,0x80999a], cloud:0xfffaf2,
+    hemiSky:0xe8eef5, hemiGround:0xa8b0c8, hemiI:1.8, sunColor:0xfff1d6, sunI:2.2,
+    stars:0, inLight:0xaaa49c, ground:0x8f9a86, island:0x8e9fb0, glass:0xb9c9d8 },
+  { t:.42, name:'昼',
+    skyTop:0xf4c49a, skyBot:0xf2e5c9, glow:0xffd9a8, fog:0xf0e2c6,
+    seaDeep:0x7fa3a0, seaLight:0xc2d3c2, hills:[0xc2cfb2,0xa7bca6,0x87a39a], cloud:0xfff6e8,
+    hemiSky:0xfbe6cc, hemiGround:0xc6bff4, hemiI:1.7, sunColor:0xffe4c0, sunI:1.8,
+    stars:0, inLight:0xb8b2a8, ground:0x9aa88c, island:0x93a89c, glass:0xc6d3c9 },
+  { t:.66, name:'夕方',
+    skyTop:0x6a6eae, skyBot:0xffd3a2, glow:0xffb070, fog:0xefbba1,
+    seaDeep:0x4d6098, seaLight:0xc3919e, hills:[0xa08aa6,0x7f6d92,0x68587e], cloud:0xf4baae,
+    hemiSky:0xf2c4b5, hemiGround:0x6b5b7b, hemiI:1.3, sunColor:0xffc79f, sunI:1.6,
+    stars:.1, inLight:0x8c8088, ground:0x8e80a1, island:0x8c7ba7, glass:0xcaa0a8 },
+  { t:.85, name:'夜',
+    skyTop:0x0e0c2e, skyBot:0x3a3870, glow:0x8d8fc0, fog:0x3f3b6a,
+    seaDeep:0x111b44, seaLight:0x28356d, hills:[0x2f2f5e,0x262650,0x1e1e42], cloud:0x4a4878,
+    hemiSky:0x5c62a8, hemiGround:0x221c3a, hemiI:.7, sunColor:0xb7c3ff, sunI:.5,
+    stars:1, inLight:0x3a3850, ground:0x3e3c68, island:0x30305c, glass:0x2e2d55 },
+];
+const COLOR_KEYS = ['skyTop','skyBot','glow','fog','seaDeep','seaLight','cloud','hemiSky','hemiGround','sunColor','inLight','ground','island','glass'];
+const NUM_KEYS = ['hemiI','sunI','stars'];
+function makePal(src){
+  const p = { hills:[] };
+  for(const k of COLOR_KEYS) p[k] = new THREE.Color(src ? src[k] : 0);
+  for(const k of NUM_KEYS) p[k] = src ? src[k] : 0;
+  for(let i=0;i<3;i++) p.hills.push(new THREE.Color(src ? src.hills[i] : 0));
+  return p;
+}
+const PALS = KEYS.map(makePal);
+const cur = makePal(null);
+let curName = '';
+function evalPalette(t){
+  t = ((t % 1) + 1) % 1;
+  let i = KEYS.length - 1;
+  for(let k=0;k<KEYS.length;k++){ if(t >= KEYS[k].t) i = k; }
+  const j = (i + 1) % KEYS.length;
+  const a = KEYS[i].t, b = KEYS[j].t + (j === 0 ? 1 : 0);
+  const tt = t < a ? t + 1 : t;
+  const e = sstep(a, b, tt);
+  const A = PALS[i], B = PALS[j];
+  for(const k of COLOR_KEYS) cur[k].copy(A[k]).lerp(B[k], e);
+  for(const k of NUM_KEYS) cur[k] = A[k] + (B[k] - A[k])*e;
+  for(let h=0;h<3;h++) cur.hills[h].copy(A.hills[h]).lerp(B.hills[h], e);
+  curName = e < .5 ? KEYS[i].name : KEYS[j].name;
+}
+
+/* ---------- 時刻から決まる量 ---------- */
+// 上がる区間 [a,b] と下がる区間 [c,d] を持つ 0/1 のスイッチ
+function onOff(t, a, b, c, d){
+  const rise = sstep(a, b, t), fall = 1 - sstep(c, d, t);
+  if(a < c) return Math.min(rise, fall);          // 同じ日の中で点いて消える
+  return Math.max(rise, fall);                      // 日をまたぐ（夜に点いて朝に消える）
+}
+const lampsOn   = t => onOff(t, .63, .70, .05, .10);   // 街灯・灯台・ランタン・小舟
+const roomOn    = t => onOff(t, .58, .62, .79, .81);   // 室内の照明。家主は早寝
+function litFrac(t){                                   // 町の窓明かりの割合
+  if(t < .04) return .12;
+  if(t < .10) return .12*(1 - sstep(.04, .10, t));
+  if(t < .60) return 0;
+  if(t < .74) return .85*sstep(.60, .74, t);
+  if(t < .80) return .85;
+  if(t < .95) return .85 - .73*sstep(.80, .95, t);
+  return .12;
+}
+
+// 窓は南向き。太陽は左（東）から昇って右（西）へ沈む。弧は画角に寄せて狭めてある
+// 窓の上端は視線から約17°。太陽は沈む前、月は一晩じゅう窓の中に入る高さにしてある
+const sunDir = new THREE.Vector3(0, 1, 0), moonDir = new THREE.Vector3(0, 1, 0);
+function arcDir(out, p, azSpan, elMax){
+  const az = (p - .5)*azSpan, el = Math.sin(Math.PI*p)*elMax;
+  out.set(Math.sin(az)*Math.cos(el), Math.sin(el), -Math.cos(az)*Math.cos(el));
+}
+let sunUp = 0, moonUp = 0, moonPhase = 0;
+function updateSky(t){
+  const p = (t - SUNRISE)/(SUNSET - SUNRISE);
+  arcDir(sunDir, p, THREE.MathUtils.degToRad(24), THREE.MathUtils.degToRad(66));
+  sunUp = sstep(-.04, .04, sunDir.y);
+  let tm = t < MOONSET - 1 ? t + 1 : t;
+  const q = (tm - MOONRISE)/(MOONSET - MOONRISE);
+  arcDir(moonDir, q, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(14));
+  moonUp = (q >= 0 && q <= 1) ? sstep(-.02, .06, moonDir.y) : 0;
+  moonPhase = ((dayCount + t)/MOON_CYCLE_DAYS) % 1;
+}
+
+/* ---------- トゥーン用の3段階グラデーション ---------- */
+const gradMap = new THREE.DataTexture(new Uint8Array([95,95,95,255, 175,175,175,255, 255,255,255,255]), 3, 1, THREE.RGBAFormat);
+gradMap.minFilter = gradMap.magFilter = THREE.NearestFilter;
+gradMap.generateMipmaps = false;
+gradMap.needsUpdate = true;
+function toon(color, extra){ return new THREE.MeshToonMaterial(Object.assign({ color, gradientMap:gradMap }, extra || {})); }
+/* 室内の素材：時間帯の明るさを色に掛けて、部屋を暗く沈める */
+const interior = [];
+function inToon(color, extra){
+  const m = toon(color, extra);
+  interior.push({ m, base:new THREE.Color(color) });
+  return m;
+}
+/* 時間帯の色をそのまま持つ素材 */
+const tinted = [];
+function tintToon(key, extra){ const m = toon(0xffffff, extra); tinted.push({ m, key }); return m; }
+
+/* ---------- 輪郭線（反転ハル。体色に近い暗色で描く） ---------- */
+const OUT_IN = 0x4a3446, OUT_EX = 0x2c2749;
+const outlineMats = {};
+function outlineMat(col){
+  if(!outlineMats[col]) outlineMats[col] = new THREE.MeshBasicMaterial({ color:col, side:THREE.BackSide });
+  return outlineMats[col];
+}
+function addOutline(mesh, t, col){
+  const g = mesh.geometry;
+  if(!g.boundingBox) g.computeBoundingBox();
+  const s = new THREE.Vector3(); g.boundingBox.getSize(s);
+  const o = new THREE.Mesh(g, outlineMat(col));
+  o.scale.set(s.x > 1e-4 ? (s.x + 2*t)/s.x : 1, s.y > 1e-4 ? (s.y + 2*t)/s.y : 1, s.z > 1e-4 ? (s.z + 2*t)/s.z : 1);
+  mesh.add(o);
+  return o;
+}
+function box(w,h,d,mat,x,y,z,parent,outline,oc){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  (parent || scene).add(m);
+  if(outline) addOutline(m, outline, oc || OUT_IN);
+  return m;
+}
+
+/* ---------- テクスチャ ----------
+   透明に近い画素を持つものは、キャンバスのグラデーションでなく画素を直接書く
+   （iOS でキャンバスの半透明画素が虹色の点々に崩れるため） */
+function radialTex(n, fn){
+  const px = new Uint8Array(n*n*4), c = n/2;
+  for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+    const d = Math.min(1, Math.hypot(x - c + .5, y - c + .5)/c);
+    const [r,g,b,a] = fn(d), o = (y*n + x)*4;
+    px[o] = r; px[o+1] = g; px[o+2] = b; px[o+3] = a;
+  }
+  const t = new THREE.DataTexture(px, n, n);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true;
+  return t;
+}
+const glowTex = radialTex(64, d => [255,255,255, 255*Math.pow(1 - d, 2.2)]);
+function canvasTex(size, draw, h){
+  const c = document.createElement('canvas');
+  c.width = size; c.height = h || size;
+  draw(c.getContext('2d'), c.width, c.height);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const doilyTex = canvasTex(256, (g,w)=>{
+  const c = w/2;
+  g.fillStyle = '#fbf3e6';
+  g.beginPath();
+  for(let i=0;i<=240;i++){
+    const a = i/240*Math.PI*2, r = 118 + Math.sin(a*24)*7;
+    const x = c + Math.cos(a)*r, y = c + Math.sin(a)*r;
+    i ? g.lineTo(x,y) : g.moveTo(x,y);
+  }
+  g.fill();
+  g.globalCompositeOperation = 'destination-out';
+  for(let ring=0; ring<3; ring++){
+    const rr = 44 + ring*26, n = 12 + ring*8, size = 5 + ring*1.2;
+    for(let i=0;i<n;i++){
+      const a = i/n*Math.PI*2 + ring*.2;
+      g.beginPath(); g.arc(c+Math.cos(a)*rr, c+Math.sin(a)*rr, size, 0, Math.PI*2); g.fill();
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.strokeStyle = 'rgba(190,160,140,.5)'; g.lineWidth = 2;
+  g.beginPath(); g.arc(c,c,30,0,Math.PI*2); g.stroke();
+});
+
+/* ---------- 光源 ---------- */
+const hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 1);
+scene.add(hemi);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);   // 昼は太陽、夜は月
+scene.add(dirLight);
+const roomLight = new THREE.PointLight(0xffc88a, 0, 14, 1.6);
+roomLight.position.set(2.2, 3.4, 2.6);
+scene.add(roomLight);
+
+/* ================================================================
+   空：グラデーションのドーム＋ノイズの滲み。カメラに追従する。
+   方位は角度でなく円上の点としてノイズに渡す（真西で継ぎ目が出るため）。
+================================================================ */
+const skyMat = new THREE.ShaderMaterial({
+  side:THREE.BackSide, depthWrite:false, fog:false,
+  uniforms:{
+    uTop:{value:new THREE.Vector3()}, uBot:{value:new THREE.Vector3()}, uGlow:{value:new THREE.Vector3()},
+    uFog:{value:new THREE.Vector3()}, uSun:{value:sunDir}, uMoon:{value:moonDir},
+    uMoonGlow:{value:new THREE.Vector3(.55,.56,.75)}, uMoonUp:{value:0}, uSunUp:{value:0}
+  },
+  vertexShader:`varying vec3 vW;
+    void main(){ vW=(modelMatrix*vec4(position,1.)).xyz; gl_Position=projectionMatrix*viewMatrix*vec4(vW,1.); }`,
+  fragmentShader:`varying vec3 vW; uniform vec3 uTop,uBot,uGlow,uFog,uSun,uMoon,uMoonGlow; uniform float uMoonUp,uSunUp;
+    ${GLSL_NOISE}
+    void main(){
+      vec3 d=normalize(vW-cameraPosition);
+      float h=max(d.y,0.);
+      vec3 col=mix(uBot,uTop,smoothstep(.0,.5,pow(h,.8)));
+      // 太陽の方向の明るみ。沈んだ後も水平線近くに残る
+      float s=max(dot(d,uSun),0.);
+      float low=1.-smoothstep(-.1,.35,uSun.y);
+      col=mix(col,uGlow,pow(s,6.)*(.45+.35*low)*(1.-smoothstep(.0,.7,h)));
+      // 月のまわりの弱い明るみ
+      float m=max(dot(d,uMoon),0.);
+      col=mix(col,uMoonGlow,pow(m,30.)*.5*uMoonUp);
+      // 水平線は霧の色に溶かす
+      col=mix(col,uFog,(1.-smoothstep(0.,.1,h))*.65);
+      vec2 hd=normalize(d.xz+vec2(1e-5));
+      float w=fbm(hd*2.6 + vec2(h*5., -h*3.));
+      col*=.975+.05*w;
+      gl_FragColor=vec4(col,1.);
+    }`
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(2500, 32, 16), skyMat);
+sky.renderOrder = -2;
+scene.add(sky);
+
+/* 星 */
+const STAR_N = 1800;
+{
+  var starPos = new Float32Array(STAR_N*3), starSeed = new Float32Array(STAR_N), starSize = new Float32Array(STAR_N);
+  for(let i=0;i<STAR_N;i++){
+    const u = rnd()*Math.PI*2, v = 0.03 + Math.pow(rnd(), .8)*0.97;
+    const y = v, r = Math.sqrt(1-y*y);
+    starPos[i*3] = Math.cos(u)*r*1800; starPos[i*3+1] = y*1800; starPos[i*3+2] = Math.sin(u)*r*1800;
+    starSeed[i] = rnd();
+    starSize[i] = rnd() < .08 ? 5.5 + rnd()*3 : 1.6 + rnd()*2;
+  }
+}
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos,3));
+starGeo.setAttribute('aSeed', new THREE.BufferAttribute(starSeed,1));
+starGeo.setAttribute('aSize', new THREE.BufferAttribute(starSize,1));
+const starMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, fog:false,
+  uniforms:{ uTime:{value:0}, uOpacity:{value:1}, uDpr:{value:DPR} },
+  vertexShader:`attribute float aSeed; attribute float aSize; uniform float uTime, uDpr; varying float vA;
+    void main(){
+      vec4 mv = modelViewMatrix*vec4(position,1.);
+      gl_Position = projectionMatrix*mv;
+      float tw = .55 + .45*sin(uTime*(.5+aSeed*1.5) + aSeed*40.);
+      vA = tw;
+      gl_PointSize = aSize*(.75+.4*tw)*uDpr;
+    }`,
+  fragmentShader:`uniform float uOpacity; varying float vA;
+    void main(){
+      vec2 c = gl_PointCoord - .5; float d = length(c);
+      float core = smoothstep(.5, 0., d); core *= core;
+      float cr = max(0.,1.-abs(c.x)*9.)*max(0.,1.-abs(c.y)*2.2) + max(0.,1.-abs(c.y)*9.)*max(0.,1.-abs(c.x)*2.2);
+      float a = max(core, cr*.7) * vA * uOpacity;
+      gl_FragColor = vec4(1.,.96,.88, a);
+    }`
+});
+const stars = new THREE.Points(starGeo, starMat);
+stars.renderOrder = -1;
+scene.add(stars);
+
+/* ================================================================
+   太陽と月：別の物体。どちらも時刻から位置を計算して空を渡る。
+   太陽は模様なし。月はクレーター模様と満ち欠けを持つ。
+================================================================ */
+const ORB_DIST = 1500;
+const sunMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, fog:false,
+  uniforms:{ uCol:{value:new THREE.Vector3(1,.95,.8)}, uLow:{value:0}, uVis:{value:1} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader:`uniform vec3 uCol; uniform float uLow,uVis; varying vec2 vUv;
+    void main(){
+      float d=length(vUv-.5)*2.;
+      float disc=1.-smoothstep(.20,.24,d);
+      float halo=pow(max(0.,1.-d),2.5)*(.35+.4*uLow);
+      vec3 col=mix(uCol,vec3(1.,.99,.93),disc*.8);
+      gl_FragColor=vec4(col, max(disc, halo)*uVis);
+    }`
+});
+const sun = new THREE.Mesh(new THREE.PlaneGeometry(1,1), sunMat);
+scene.add(sun);
+const moonMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, fog:false,
+  uniforms:{ uPhase:{value:0}, uVis:{value:1}, uCol:{value:new THREE.Vector3(1,.96,.86)} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader:`uniform float uPhase,uVis; uniform vec3 uCol; varying vec2 vUv;
+    ${GLSL_NOISE}
+    void main(){
+      vec2 p=(vUv-.5)*2.;
+      float d=length(p);
+      float disc=1.-smoothstep(.30,.33,d);
+      vec2 n2=p/.31;
+      float z2=1.-dot(n2,n2);
+      vec3 n=vec3(n2, sqrt(max(z2,0.)));
+      // 満ち欠け：光の向きを位相で回す。0 が満月
+      float ph=uPhase*6.2831853;
+      vec3 L=normalize(vec3(sin(ph), .12, cos(ph)));
+      float lit=smoothstep(-.08,.12,dot(n,L));
+      // クレーター：ノイズの暗い斑と、縁の明るい輪
+      float c1=fbm(n2*3.1+7.3), c2=noise(n2*9.+2.);
+      float mare=smoothstep(.45,.62,c1)*.22;
+      float pits=smoothstep(.72,.85,c2)*.16;
+      float rim=smoothstep(.68,.72,c2)*(1.-smoothstep(.72,.78,c2))*.12;
+      vec3 col=uCol*(1.-mare-pits+rim);
+      col*=mix(.10,1.,lit);
+      float halo=pow(max(0.,1.-d),3.)*.22;
+      gl_FragColor=vec4(mix(uCol*.8,col,disc), max(disc, halo)*uVis);
+    }`
+});
+const moon = new THREE.Mesh(new THREE.PlaneGeometry(1,1), moonMat);
+scene.add(moon);
+
+/* ================================================================
+   遠山：地平を囲む重なったシルエット。頂点色で下端を霧色へ寄せる。
+   海の先は水平線にしたいので、正面は低く、左右の端ほど高くする。
+================================================================ */
+const HILLS = [
+  { r:620, h:62, seed:1.3, bias:-.05 },
+  { r:560, h:46, seed:4.1, bias:-.15 },
+  { r:500, h:32, seed:7.7, bias:-.35 },
+];
+const hills = new THREE.Group();
+const hillMeshes = [];
+for(const L of HILLS){
+  const N = 420, pos=[], col=[], mask=[], idx=[];
+  for(let i=0;i<=N;i++){
+    const a = i/N*Math.PI*2;
+    let n = 0.55*Math.sin(a*3+L.seed) + 0.30*Math.sin(a*7+L.seed*2.3)
+          + 0.18*Math.sin(a*13+L.seed*5.1) + 0.07*Math.sin(a*29+L.seed*9.7);
+    n = Math.max(0, n*0.5+0.5+L.bias);
+    // 視線（-z）からの方位。正面 ±22° は水平線のまま、60° で山の高さが出切る
+    let da = a + Math.PI/2; da = Math.atan2(Math.sin(da), Math.cos(da));
+    const side = sstep(.38, 1.05, Math.abs(da));
+    const h = (L.h * Math.pow(n,1.4) + 3) * side;
+    const x = Math.cos(a)*L.r, z = Math.sin(a)*L.r;
+    pos.push(x,h,z, x,-60,z);
+    col.push(0,0,0, 0,0,0);
+    mask.push(side, 0);
+    if(i<N){ const k=i*2; idx.push(k,k+1,k+2, k+1,k+3,k+2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors:true, fog:false, side:THREE.DoubleSide }));
+  m.renderOrder = -1;
+  hills.add(m);
+  hillMeshes.push({ m, mask });
+}
+scene.add(hills);
+const _hc = new THREE.Color();
+function paintHills(p){
+  hillMeshes.forEach((H, li)=>{
+    const top = p.hills[li], fog = p.fog, ca = H.m.geometry.attributes.color;
+    for(let i=0;i<ca.count;i++){
+      // 下端は霧色、上端は山の色。正面の低い部分は上端も霧色へ寄せて線を消す
+      _hc.copy(fog).lerp(top, H.mask[i]*.9);
+      ca.setXYZ(i, _hc.r, _hc.g, _hc.b);
+    }
+    ca.needsUpdate = true;
+  });
+}
+
+/* ================================================================
+   海：fbm で歪ませた水彩の濃淡、うねり、太陽と月の照り返し、きらめき、霧。
+   波紋・浅瀬・鳥の影は持ってこない。
+================================================================ */
+const SEA_Y = -6;
+const seaMat = new THREE.ShaderMaterial({
+  fog:false,
+  uniforms:{ uT:{value:0}, uDeep:{value:new THREE.Vector3()}, uLight:{value:new THREE.Vector3()},
+             uFog:{value:new THREE.Vector3()}, uNear:{value:50}, uFar:{value:470},
+             uSun:{value:sunDir}, uGlow:{value:new THREE.Vector3()}, uSunUp:{value:0}, uSunLow:{value:0},
+             uMoon:{value:moonDir}, uMoonCol:{value:new THREE.Vector3(.85,.87,1)}, uMoonUp:{value:0} },
+  vertexShader:`varying vec3 vW;
+    void main(){ vW=(modelMatrix*vec4(position,1.)).xyz; gl_Position=projectionMatrix*viewMatrix*vec4(vW,1.); }`,
+  fragmentShader:`precision highp float; varying vec3 vW;
+    uniform float uT,uNear,uFar,uSunUp,uSunLow,uMoonUp; uniform vec3 uDeep,uLight,uFog,uSun,uGlow,uMoon,uMoonCol;
+    ${GLSL_NOISE}
+    vec3 waves(vec2 p, float t){
+      vec2 D[4]; D[0]=vec2(.8,.6); D[1]=vec2(-.5,.87); D[2]=vec2(.2,-.98); D[3]=vec2(-.9,-.3);
+      float F[4]; F[0]=.35; F[1]=.62; F[2]=1.1; F[3]=1.9;
+      float h=0.; vec2 g=vec2(0.);
+      for(int i=0;i<4;i++){
+        float ph=dot(p,D[i])*F[i] + t*1.6*sqrt(9.8*F[i]);
+        float a=.12/F[i];
+        h+=a*sin(ph); g+=a*F[i]*cos(ph)*D[i];
+      }
+      return vec3(g,h);
+    }
+    void main(){
+      vec2 p=vW.xz;
+      float dist=length(p-cameraPosition.xz);
+      if(dist>=uFar){ gl_FragColor=vec4(uFog,1.); return; }
+      float t=uT*2.2;
+      float near=1.-smoothstep(25.,110.,dist);
+
+      vec2 q=p+8.*vec2(fbm3(p*.02+vec2(t*.05,0.)), fbm3(p*.02+vec2(0.,-t*.04)));
+      float big=fbm3(q*.005+vec2(t*.012,0.));
+      float mid=fbm(q*.022+vec2(t*.02,t*.03));
+      vec3 col=mix(uDeep,uLight,smoothstep(.3,.72,big));
+      float edge=1.-smoothstep(0.,.035,abs(mid-.52));
+      col=mix(col,uDeep*.88,edge*.3);
+      col=mix(col,uLight*1.03,smoothstep(.55,.75,mid)*.3);
+      float r1=fbm3(vec2(q.x*.07,q.y*.24)+vec2(t*.35,t*.12));
+      float r2=fbm3(vec2(q.x*.22,q.y*.08)+vec2(-t*.22,t*.3));
+      col+=smoothstep(.6,.76,r1)*.05 + smoothstep(.62,.78,r2)*.035;
+      col-=smoothstep(.6,.3,r1*r2*2.)*.02;
+
+      vec3 w=waves(mix(p,q,.7),uT);
+      float gust=mix(.3,1.35,smoothstep(.28,.72,fbm3(q*.011+vec2(-t*.03,t*.02))));
+      vec2 gsum=w.xy*1.6*gust*.8;
+      vec2 cg=vec2(0.);
+      if(near>0.){
+        vec2 E[3]; E[0]=vec2(.94,.34); E[1]=vec2(-.6,.8); E[2]=vec2(.1,-1.);
+        float G[3]; G[0]=3.1; G[1]=5.3; G[2]=8.7;
+        for(int i=0;i<3;i++){
+          float ph=dot(p,E[i])*G[i] + uT*1.6*sqrt(9.8*G[i]);
+          cg+=.03*cos(ph)*E[i];
+        }
+        vec2 e=vec2(.35,0.), o=vec2(uT*.9,uT*.6);
+        float nn=fbm3(p*1.1+o);
+        cg+=vec2(fbm3(p*1.1+e+o)-nn, fbm3(p*1.1+e.yx+o)-nn)*.3;
+        gsum+=cg*near*mix(.6,1.1,gust);
+      }
+      vec3 n=normalize(vec3(-gsum.x,1.,-gsum.y));
+      vec3 v=normalize(vW-cameraPosition);
+      vec3 r=reflect(v,n);
+      float s=max(dot(r,uSun),0.);
+      float sm=max(dot(r,uMoon),0.);
+      float fr=pow(1.-max(dot(-v,n),0.),4.);
+
+      float lit=dot(n,uSun)-uSun.y;
+      col+=lit*vec3(.9,.8,.6)*(.08+near*.22)*uSunUp;
+      col=mix(col,uFog*1.02,fr*.3);
+      col=mix(col,uDeep*.92,(1.-fr)*near*.18);
+      if(near>0.){
+        float crest=smoothstep(.62,.7,fbm3(vec2(p.x*.9,p.y*.45)+cg*2.+vec2(uT*.7,uT*.3)));
+        col=mix(col,uLight*1.08,crest*near*.35);
+      }
+      // 照り返し：太陽が低いほど強く、温かく。月は弱く
+      float sheen=pow(s,mix(10.,5.,uSunLow))*mix(.22,.7,uSunLow)*uSunUp;
+      col=mix(col,uGlow*1.05,sheen);
+      col=mix(col,uMoonCol,pow(sm,16.)*.28*uMoonUp);
+      // きらめき：点に砕けた鋭いハイライト
+      if(dist<500.){
+        float cell=hash(floor(q*1.3));
+        float blink=.5+.5*sin(t*(3.+cell*5.)+cell*40.);
+        float dots=smoothstep(.74,.95,noise(q*1.3+vec2(t*.6,t*.4)))*blink*mix(.55,1.1,gust);
+        float sp=pow(s,110.)*dots*(2.6+2.*uSunLow)*uSunUp + pow(sm,110.)*dots*1.6*uMoonUp;
+        sp*=1.-smoothstep(200.,500.,dist);
+        col=mix(col,vec3(1.,.97,.9),min(sp,1.)*.85);
+      }
+      col=mix(col,uFog,smoothstep(uNear,uFar,dist));
+      gl_FragColor=vec4(col,1.);
+    }`
+});
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(2600, 2600), seaMat);
+sea.rotation.x = -Math.PI/2;
+sea.position.set(0, SEA_Y, -500);
+scene.add(sea);
+
+/* ================================================================
+   雲：画素を直接書いた水彩の塊。時間帯で色を変える。
+================================================================ */
+const cloudMats = [];
+{
+  const cn = (x,y,sd)=>{
+    let v=0,a=.5,f=1;
+    for(let o=0;o<4;o++){
+      const X=x*f+sd*13.1, Y=y*f+sd*7.7, xi=Math.floor(X), yi=Math.floor(Y);
+      const fx=X-xi, fy=Y-yi, u=fx*fx*(3-2*fx), w=fy*fy*(3-2*fy);
+      const h=(p,q)=>{ const t=Math.sin(p*127.1+q*311.7)*43758.5453; return t-Math.floor(t); };
+      v+=a*((h(xi,yi)*(1-u)+h(xi+1,yi)*u)*(1-w)+(h(xi,yi+1)*(1-u)+h(xi+1,yi+1)*u)*w);
+      a*=.5; f*=2;
+    }
+    return v;
+  };
+  for(let k=0;k<4;k++){
+    const W=256,H=128, px=new Uint8Array(W*H*4);
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const nx=(x-W/2)/(W/2), ny=(y-H*.62)/(H*.5);
+      let body = 1 - (nx*nx + (ny<0? ny*ny*.9 : ny*ny*4.0));
+      body += (cn(x/40,y/40,k)-.5)*1.1;
+      const d = Math.min(1, Math.max(0, body*2.2));
+      const rim = Math.max(0, 1-Math.abs(body-.08)/.08);
+      const ex = Math.min(x, W-1-x)/(W*.12), ey = Math.min(y, H-1-y)/(H*.12);
+      const edge = Math.min(1, ex)*Math.min(1, ey);
+      const al = (d*.55 + rim*.25) * edge*edge*(3-2*edge);
+      const shade = 1 - rim*.08 - Math.max(0,ny)*.06;
+      const o=((H-1-y)*W+x)*4;
+      px[o]=255*shade; px[o+1]=250*shade; px[o+2]=240*shade; px[o+3]=Math.min(255,al*255);
+    }
+    const t=new THREE.DataTexture(px,W,H); t.colorSpace=THREE.SRGBColorSpace;
+    t.magFilter=THREE.LinearFilter; t.minFilter=THREE.LinearFilter; t.needsUpdate=true;
+    cloudMats.push(new THREE.SpriteMaterial({ map:t, transparent:true, depthWrite:false, opacity:.85 }));
+  }
+}
+const clouds = [];
+for(let i=0;i<14;i++){
+  const c = new THREE.Sprite(cloudMats[i%4]);
+  const z = -(260 + rnd()*500);
+  c.position.set(-520 + rnd()*1040, 50 + rnd()*110, z);
+  const w = 90 + rnd()*160; c.scale.set(w, w*.5, 1);
+  c.userData.v = (0.8 + rnd()*1.2)*MOTION;
+  scene.add(c); clouds.push(c);
+}
+
+/* ---------- 地形 ---------- */
+function bump(x,z,cx,cz,h,sx,sz){ return h*Math.exp(-(((x-cx)*(x-cx))/sx + ((z-cz)*(z-cz))/sz)); }
+function groundY(x,z){
+  const d = -z;
+  let y;
+  if(d < 6) y = -1.5;
+  else if(d < 34) y = -1.5 - (d-6)/28*4.3;
+  else y = -5.8 - (d-34)*.35;
+  y += Math.pow(Math.abs(x)/34, 2) * 7 * Math.min(1, Math.max(0, (d-4)/10));
+  y += bump(x,z,19,-47,6,70,140) + bump(x,z,-30,-62,11,160,220);
+  return y;
+}
+const groundMat = tintToon('ground');
+const gGeo = new THREE.PlaneGeometry(150, 115, 100, 80);
+gGeo.rotateX(-Math.PI/2);
+gGeo.translate(0, 0, -52);
+{
+  const pa = gGeo.attributes.position;
+  for(let i=0;i<pa.count;i++) pa.setY(i, groundY(pa.getX(i), pa.getZ(i)));
+  gGeo.computeVertexNormals();
+}
+scene.add(new THREE.Mesh(gGeo, groundMat));
+
+/* 島影 */
+const islandMat = tintToon('island');
+[[-120,-230,40,9],[-60,-260,26,6],[70,-240,55,11],[150,-280,34,7],[20,-300,20,4]].forEach(([x,z,r,h])=>{
+  const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 9), islandMat);
+  m.position.set(x, SEA_Y + h/2 - .6, z);
+  m.scale.z = .45;
+  scene.add(m);
+});
+
+/* ---------- 町並み ---------- */
+const WALLS = [0xf1e6d4,0xf2d4d0,0xd3e0ef,0xd6e8dc,0xe2d6ef,0xf3e5c4,0xe9e2ea];
+const ROOFS = [0xb8705f,0x5f8f96,0x5e6aa0,0x9c6f8e,0xc98a5d,0x6f8a6a];
+const houses = [];
+for(let r=0;r<9;r++){
+  const zc = -9.5 - r*2.9;
+  const n = 6 + r*2, span = 5 + r*2.8;
+  for(let i=0;i<n;i++){
+    const x = -span + (i+.5)/n*2*span + (rnd()-.5)*1.4;
+    const z = zc + (rnd()-.5)*1.2;
+    const gy = groundY(x,z);
+    if(gy < -5.3) continue;
+    if(r < 4 && Math.abs(x) < 1.9) continue;
+    const tower = r >= 3 && rnd() < .14;
+    const w = tower ? 1.1 + rnd()*.4 : 1.3 + rnd()*1.1;
+    const d = tower ? w : 1.3 + rnd()*.9;
+    const h = tower ? 2.4 + rnd()*1.2 : (r < 3 ? .9 + rnd()*.7 : 1.1 + rnd()*1.3);
+    houses.push({ x, z, gy, w, d, h, ry:(rnd()-.5)*.28, tower,
+      wall:pick(WALLS), roof:pick(ROOFS), rh:tower ? 1.2 + rnd()*.4 : .6 + rnd()*.5 });
+  }
+}
+function prismGeo(){
+  const P = [
+    -.5,-.5,.5,  .5,-.5,.5,  .5,.5,0,   -.5,-.5,.5,  .5,.5,0,  -.5,.5,0,
+     .5,-.5,-.5, -.5,-.5,-.5, -.5,.5,0,  .5,-.5,-.5, -.5,.5,0,  .5,.5,0,
+    -.5,-.5,-.5, -.5,-.5,.5, -.5,.5,0,
+     .5,-.5,.5,  .5,-.5,-.5,  .5,.5,0
+  ];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P,3));
+  g.computeVertexNormals();
+  return g;
+}
+const pyrGeo = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4);
+pyrGeo.rotateY(Math.PI/4);
+const unitBox = new THREE.BoxGeometry(1,1,1);
+const gableGeo = prismGeo();
+const gables = houses.filter(h=>!h.tower), towers = houses.filter(h=>h.tower);
+const bodyIM = new THREE.InstancedMesh(unitBox, toon(0xffffff), houses.length);
+const bodyOL = new THREE.InstancedMesh(unitBox, outlineMat(OUT_EX), houses.length);
+const gableIM = new THREE.InstancedMesh(gableGeo, toon(0xffffff), gables.length);
+const gableOL = new THREE.InstancedMesh(gableGeo, outlineMat(OUT_EX), gables.length);
+const pyrIM = new THREE.InstancedMesh(pyrGeo, toon(0xffffff), towers.length);
+const pyrOL = new THREE.InstancedMesh(pyrGeo, outlineMat(OUT_EX), towers.length);
+
+const winList = [];
+const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), V3 = new THREE.Vector3(), S3 = new THREE.Vector3();
+const UP = new THREE.Vector3(0,1,0);
+const col = new THREE.Color();
+const OT = .055;
+let gi = 0, ti = 0;
+houses.forEach((hs, i)=>{
+  Q.setFromAxisAngle(UP, hs.ry);
+  const cy = hs.gy + hs.h/2 - .3;
+  V3.set(hs.x, cy, hs.z);
+  M.compose(V3, Q, S3.set(hs.w, hs.h, hs.d)); bodyIM.setMatrixAt(i, M);
+  M.compose(V3, Q, S3.set(hs.w+OT*2, hs.h+OT*2, hs.d+OT*2)); bodyOL.setMatrixAt(i, M);
+  bodyIM.setColorAt(i, col.set(hs.wall));
+  const top = cy + hs.h/2;
+  if(hs.tower){
+    V3.set(hs.x, top + hs.rh/2 - .02, hs.z);
+    M.compose(V3, Q, S3.set(hs.w*1.18, hs.rh, hs.d*1.18)); pyrIM.setMatrixAt(ti, M);
+    M.compose(V3, Q, S3.set(hs.w*1.18+OT*2, hs.rh+OT*2, hs.d*1.18+OT*2)); pyrOL.setMatrixAt(ti, M);
+    pyrIM.setColorAt(ti, col.set(hs.roof)); ti++;
+  } else {
+    V3.set(hs.x, top + hs.rh/2 - .02, hs.z);
+    M.compose(V3, Q, S3.set(hs.w*1.12, hs.rh, hs.d*1.18)); gableIM.setMatrixAt(gi, M);
+    M.compose(V3, Q, S3.set(hs.w*1.12+OT*2, hs.rh+OT*2, hs.d*1.18+OT*2)); gableOL.setMatrixAt(gi, M);
+    gableIM.setColorAt(gi, col.set(hs.roof)); gi++;
+  }
+  const rows = hs.h > 1.8 ? 2 : 1;
+  const cols = Math.max(1, Math.min(3, Math.floor(hs.w/.6)));
+  for(let rr=0; rr<rows; rr++){
+    for(let cc=0; cc<cols; cc++){
+      if(rnd() < .25) continue;
+      const lx = (cc - (cols-1)/2) * (hs.w/(cols+.4));
+      const ly = hs.h/2 - .45 - rr*.75;
+      const local = new THREE.Vector3(lx, ly, hs.d/2 + .012).applyQuaternion(Q);
+      winList.push({ p:new THREE.Vector3(hs.x, cy, hs.z).add(local), q:Q.clone(), tone:rnd() });
+    }
+  }
+});
+[bodyIM, gableIM, pyrIM].forEach(m=>{ if(m.instanceColor) m.instanceColor.needsUpdate = true; });
+[bodyIM, bodyOL, gableIM, gableOL, pyrIM, pyrOL].forEach(m=>scene.add(m));
+
+/* 窓明かり：灯る順番を決めておき、割合に応じて一つずつ点き、一つずつ消える */
+{
+  const order = winList.map((_, i)=>i);
+  for(let i=order.length-1;i>0;i--){ const j = Math.floor(rnd()*(i+1)); [order[i], order[j]] = [order[j], order[i]]; }
+  order.forEach((wi, rank)=>{ winList[wi].rank = rank/order.length; });
+}
+const winGeo = new THREE.PlaneGeometry(.26, .34);
+const winIM = new THREE.InstancedMesh(winGeo, new THREE.MeshBasicMaterial({ color:0xffffff }), winList.length);
+winList.forEach((w,i)=>{ M.compose(w.p, w.q, S3.set(1,1,1)); winIM.setMatrixAt(i, M); winIM.setColorAt(i, col.set(0x000000)); });
+scene.add(winIM);
+const LIT_COLS = [new THREE.Color(0xffd489), new THREE.Color(0xffc274), new THREE.Color(0xffe4b4)];
+let lastLit = -1;
+function paintWindows(p, frac, force){
+  if(!force && Math.abs(frac - lastLit) < 1/winList.length*.5) return;
+  lastLit = frac;
+  winList.forEach((w,i)=>{
+    if(w.rank < frac) col.copy(LIT_COLS[Math.floor(w.tone*3)]);
+    else col.copy(p.glass);
+    winIM.setColorAt(i, col);
+  });
+  winIM.instanceColor.needsUpdate = true;
+}
+
+/* 街灯：柱と灯具を持たせる（手前の列が手すり越しに滲んだ丸に見えていたため） */
+const lampPts = [];
+for(let r=0;r<9;r++){
+  const zc = -8.5 - r*2.9, span = 4 + r*2.8;
+  for(let k=0;k<3+r;k++){
+    const x = -span + rnd()*span*2, z = zc + (rnd()-.5);
+    const y = groundY(x,z);
+    if(y < -5.5) continue;
+    lampPts.push([x, y, z]);
+  }
+}
+const postIM = new THREE.InstancedMesh(new THREE.CylinderGeometry(.022,.028,1,6), toon(0x3e3552), lampPts.length);
+const headMat = new THREE.MeshBasicMaterial({ color:0xffcf85 });
+const headIM = new THREE.InstancedMesh(new THREE.BoxGeometry(.11,.1,.11), headMat, lampPts.length);
+const glowPos = [];
+lampPts.forEach(([x,y,z], i)=>{
+  M.compose(V3.set(x, y + .2, z), Q.identity(), S3.set(1,1,1)); postIM.setMatrixAt(i, M);
+  M.compose(V3.set(x, y + .74, z), Q, S3.set(1,1,1)); headIM.setMatrixAt(i, M);
+  glowPos.push(x, y + .74, z);
+});
+scene.add(postIM, headIM);
+const lampGeo = new THREE.BufferGeometry();
+lampGeo.setAttribute('position', new THREE.Float32BufferAttribute(glowPos,3));
+const lampMat = new THREE.PointsMaterial({ size:.55, map:glowTex, color:0xffcf85, transparent:true,
+  depthWrite:false, blending:THREE.AdditiveBlending, opacity:1 });
+scene.add(new THREE.Points(lampGeo, lampMat));
+
+/* 桟橋と小舟 */
+const woodEx = toon(0x6d5566);
+box(1.1, .18, 8, woodEx, -4.5, SEA_Y + .35, -37.5, scene, .04, OUT_EX);
+for(let k=0;k<5;k++) box(.14, 1.2, .14, woodEx, -4.5 + (k%2 ? .45 : -.45), SEA_Y - .2, -34.5 - k*1.5);
+const boats = [];
+[[-9,-38],[-1.5,-41],[5,-37.5],[10,-43]].forEach(([x,z],i)=>{
+  const g = new THREE.Group();
+  box(1.6, .32, .6, toon(pick([0xf1e6d4,0xd3e0ef,0xf2d4d0])), 0, 0, 0, g, .04, OUT_EX);
+  box(.5, .3, .42, toon(0xe9e2ea), -.25, .3, 0, g, .03, OUT_EX);
+  box(.05, 1.3, .05, woodEx, .3, .8, 0, g);
+  const light = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffd18a, transparent:true,
+    depthWrite:false, blending:THREE.AdditiveBlending }));
+  light.scale.set(.7,.7,1); light.position.set(.3, 1.5, 0);
+  g.add(light);
+  g.position.set(x, SEA_Y + .1, z);
+  g.rotation.y = rnd()*Math.PI;
+  g.userData = { phase:i*1.7, light };
+  scene.add(g); boats.push(g);
+});
+
+/* 灯台 */
+const lhX = 19, lhZ = -47, lhY = groundY(19,-47);
+const lh = new THREE.Group();
+lh.position.set(lhX, lhY - .3, lhZ);
+scene.add(lh);
+const lhWhite = toon(0xf4ece2), lhRed = toon(0xb86a6a);
+[[0,1.4,.95,1.1,lhWhite],[1.4,2.4,.85,.95,lhRed],[2.4,3.6,.75,.85,lhWhite],[3.6,4.4,.68,.75,lhRed]].forEach(([y0,y1,rt,rb,m])=>{
+  const c = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, y1-y0, 14), m);
+  c.position.y = (y0+y1)/2; lh.add(c); addOutline(c, .05, OUT_EX);
+});
+const lanternMat = new THREE.MeshBasicMaterial({ color:0xffe6a8 });
+const lantern = new THREE.Mesh(new THREE.CylinderGeometry(.5,.55,.6,12), lanternMat);
+lantern.position.y = 4.7; lh.add(lantern);
+const cap = new THREE.Mesh(new THREE.ConeGeometry(.75,.6,12), lhRed);
+cap.position.y = 5.3; lh.add(cap); addOutline(cap, .05, OUT_EX);
+const lhGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffe2a0, transparent:true,
+  depthWrite:false, blending:THREE.AdditiveBlending }));
+lhGlow.position.y = 4.7; lh.add(lhGlow);
+const beamGeo = new THREE.ConeGeometry(3.2, 36, 24, 1, true);
+beamGeo.translate(0, -18, 0);
+beamGeo.rotateZ(Math.PI/2);
+const beamMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, fog:false,
+  uniforms:{ uOp:{value:.15}, uCol:{value:new THREE.Color(0xfff0c4)} },
+  vertexShader:`varying float vL; void main(){ vL = length(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader:`uniform float uOp; uniform vec3 uCol; varying float vL;
+    void main(){ float a = uOp*(1.-smoothstep(0.,36.,vL))*smoothstep(0.,1.5,vL); gl_FragColor = vec4(uCol, a); }`
+});
+const beamPivot = new THREE.Group();
+beamPivot.position.y = 4.7;
+beamPivot.add(new THREE.Mesh(beamGeo, beamMat));
+lh.add(beamPivot);
+
+/* ================================================================
+   室内：壁と窓。窓の外が主役なので部屋は薄暗い。
+================================================================ */
+const WIN_L = -1.15, WIN_R = 1.15, WIN_B = .95, WIN_T = 3.45;
+const wallShape = new THREE.Shape();
+wallShape.moveTo(-6,-3); wallShape.lineTo(6,-3); wallShape.lineTo(6,7); wallShape.lineTo(-6,7); wallShape.lineTo(-6,-3);
+const hole = new THREE.Path();
+hole.moveTo(WIN_L,WIN_B); hole.lineTo(WIN_L,WIN_T); hole.lineTo(WIN_R,WIN_T); hole.lineTo(WIN_R,WIN_B); hole.lineTo(WIN_L,WIN_B);
+wallShape.holes.push(hole);
+const wall = new THREE.Mesh(new THREE.ExtrudeGeometry(wallShape, { depth:.3, bevelEnabled:false }), inToon(0xe8dac6));
+wall.position.z = -.3;
+scene.add(wall);
+
+/* 腰板と見切り */
+box(12, 3.55, .04, inToon(0xb9a3b6), 0, -1.25, .02);
+box(12, .06, .07, inToon(0xf3ece4), 0, .52, .04, scene, .012);
+
+/* 窓枠（室内側の額縁） */
+const trim = inToon(0xf5efe6);
+box(WIN_R - WIN_L + .26, .13, .06, trim, 0, WIN_T + .065, .03, scene, .012);
+box(.13, WIN_T - WIN_B + .13, .06, trim, WIN_L - .065, (WIN_T + WIN_B)/2, .03, scene, .012);
+box(.13, WIN_T - WIN_B + .13, .06, trim, WIN_R + .065, (WIN_T + WIN_B)/2, .03, scene, .012);
+
+/* 窓台（オルゴールの置き場所）。壁より少し明るい程度の落ち着いた色 */
+const sillWood = inToon(0xeadfcf);
+box(2.8, .07, .64, sillWood, 0, WIN_B + .035, .03, scene, .012);
+box(2.4, .1, .03, sillWood, 0, WIN_B - .06, .33, scene, .01);
+const SILL_TOP = WIN_B + .07;
+
+/* レースの敷物 */
+const doily = new THREE.Mesh(new THREE.CircleGeometry(.21, 48), inToon(0xffffff, { map:doilyTex, transparent:true, alphaTest:.5 }));
+doily.rotation.x = -Math.PI/2;
+doily.position.set(0, SILL_TOP + .002, .06);
+scene.add(doily);
+
+/* 置き場所ガイド（デバッグ表示から出す） */
+const guide = new THREE.Group();
+guide.position.set(0, SILL_TOP, .06);
+guide.visible = false;
+scene.add(guide);
+const ring = new THREE.Mesh(new THREE.RingGeometry(.235, .255, 56),
+  new THREE.MeshBasicMaterial({ color:0xffd494, transparent:true, opacity:.9, depthWrite:false }));
+ring.rotation.x = -Math.PI/2; ring.position.y = .004;
+guide.add(ring);
+const gb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(.3, .2, .22)),
+  new THREE.LineDashedMaterial({ color:0xffd494, dashSize:.025, gapSize:.018, transparent:true }));
+gb.computeLineDistances();
+gb.position.y = .1;
+guide.add(gb);
+
+/* 窓台の小物：鉢植えと小瓶。カーテンに掛からない内側に置く */
+const POT_X = -.72, BOTTLE_X = .74, SMALL_Z = -.14;
+const pot = new THREE.Mesh(new THREE.CylinderGeometry(.075,.058,.13,16), inToon(0xc58f7c));
+pot.position.set(POT_X, SILL_TOP + .065, SMALL_Z); scene.add(pot); addOutline(pot, .01, OUT_IN);
+const leafMat = inToon(0x8fb59c);
+for(let k=0;k<7;k++){
+  const a = k/7*Math.PI*2;
+  const lf = new THREE.Mesh(new THREE.ConeGeometry(.028, .1, 6), leafMat);
+  lf.position.set(POT_X + Math.cos(a)*.035, SILL_TOP + .16, SMALL_Z + Math.sin(a)*.035);
+  lf.rotation.set(Math.sin(a)*.5, 0, -Math.cos(a)*.5);
+  scene.add(lf);
+}
+const glassMat = inToon(0xb9d2ea, { transparent:true, opacity:.5 });
+const bottle = new THREE.Mesh(new THREE.CylinderGeometry(.048,.052,.18,16), glassMat);
+bottle.position.set(BOTTLE_X, SILL_TOP + .09, SMALL_Z); scene.add(bottle); addOutline(bottle, .008, OUT_IN);
+const bneck = new THREE.Mesh(new THREE.CylinderGeometry(.018,.03,.07,12), glassMat);
+bneck.position.set(BOTTLE_X, SILL_TOP + .215, SMALL_Z); scene.add(bneck);
+const cork = new THREE.Mesh(new THREE.CylinderGeometry(.02,.019,.035,10), inToon(0xc9a37a));
+cork.position.set(BOTTLE_X, SILL_TOP + .265, SMALL_Z); scene.add(cork);
+
+/* 外開きの窓 */
+const casMat = inToon(0xf5efe6);
+function casement(sign){
+  const pivot = new THREE.Group();
+  pivot.position.set(sign < 0 ? WIN_L : WIN_R, WIN_B, -.3);
+  const g = new THREE.Group();
+  const W = (WIN_R - WIN_L)/2, H = WIN_T - WIN_B, b = .065;
+  g.position.x = -sign * W/2;
+  pivot.add(g);
+  const f = casMat;
+  box(W, b, .05, f, 0, H - b/2, 0, g, .01);
+  box(W, b, .05, f, 0, b/2, 0, g, .01);
+  box(b, H, .05, f, -W/2 + b/2, H/2, 0, g, .01);
+  box(b, H, .05, f,  W/2 - b/2, H/2, 0, g, .01);
+  box(.035, H, .04, f, 0, H/2, 0, g);
+  box(W, .035, .04, f, 0, H*.36, 0, g);
+  box(W, .035, .04, f, 0, H*.68, 0, g);
+  const gl = new THREE.Mesh(new THREE.PlaneGeometry(W-.1, H-.1),
+    new THREE.MeshBasicMaterial({ color:0xc9d8f2, transparent:true, opacity:.14, side:THREE.DoubleSide, depthWrite:false }));
+  gl.position.y = H/2; g.add(gl);
+  pivot.rotation.y = sign < 0 ? 1.15 : -1.15;
+  scene.add(pivot);
+  return pivot;
+}
+casement(-1); casement(1);
+
+/* カーテン */
+const curtainMat = inToon(0xf4ecf6, { transparent:true, opacity:.8, side:THREE.DoubleSide });
+const curtains = [];
+[-1, 1].forEach(sign=>{
+  const w = .85, h = 2.6;
+  const g = new THREE.PlaneGeometry(w, h, 12, 24);
+  const base = g.attributes.position.array.slice();
+  const m = new THREE.Mesh(g, curtainMat);
+  m.position.set(sign*1.3, 3.72 - h/2, .2);
+  scene.add(m);
+  curtains.push({ m, base, w, h, sign });
+});
+const rodMat = inToon(0x8a6a5e);
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(.022,.022,4.4,10), rodMat);
+rod.rotation.z = Math.PI/2; rod.position.set(0, 3.75, .2); scene.add(rod);
+[-2.2, 2.2].forEach(x=>{
+  const fn = new THREE.Mesh(new THREE.SphereGeometry(.045, 12, 8), rodMat);
+  fn.position.set(x, 3.75, .2); scene.add(fn);
+});
+
+/* ---------- ベランダ ---------- */
+const iron = toon(0x3e3552);
+const RAIL_Z = -1.65, RAIL_TOP = 1.15, BAL_Y = .2;
+box(3.6, .12, 1.45, toon(0x9e8ea6), 0, BAL_Y - .06, -1.0);
+box(3.5, .07, .09, iron, 0, RAIL_TOP, RAIL_Z, scene, .012, OUT_EX);
+box(3.5, .05, .06, iron, 0, BAL_Y + .12, RAIL_Z);
+for(let k=0;k<=24;k++){
+  const x = -1.72 + k*(3.44/24);
+  box(.022, RAIL_TOP - BAL_Y - .1, .022, iron, x, (RAIL_TOP + BAL_Y)/2, RAIL_Z);
+}
+[-1, 1].forEach(s=>{
+  box(.07, .07, 1.4, iron, s*1.75, RAIL_TOP, -.95, scene, .012, OUT_EX);
+  box(.06, RAIL_TOP - BAL_Y, .06, iron, s*1.75, (RAIL_TOP + BAL_Y)/2, RAIL_Z);
+});
+const planter = toon(0x9a7a66);
+const petals = [0xf4b6c4, 0xffffff, 0xf9d3a0, 0xd9c2f0];
+[-0.85, 0.85].forEach(px=>{
+  box(.8, .17, .18, planter, px, RAIL_TOP + .1, RAIL_Z - .14, scene, .012, OUT_EX);
+  for(let k=0;k<11;k++){
+    const fl = new THREE.Mesh(new THREE.SphereGeometry(.035 + rnd()*.02, 8, 6), toon(pick(petals)));
+    fl.position.set(px - .34 + rnd()*.68, RAIL_TOP + .2 + rnd()*.07, RAIL_Z - .14 + (rnd()-.5)*.1);
+    scene.add(fl);
+  }
+  for(let k=0;k<8;k++){
+    const lf = new THREE.Mesh(new THREE.SphereGeometry(.04, 6, 5), toon(0x7fa58c));
+    lf.scale.set(1.3,.6,1);
+    lf.position.set(px - .36 + rnd()*.72, RAIL_TOP + .18, RAIL_Z - .14 + (rnd()-.5)*.12);
+    scene.add(lf);
+  }
+});
+const lanternBox = box(.11, .16, .11, new THREE.MeshBasicMaterial({ color:0xffdca0 }), 1.75, RAIL_TOP + .2, RAIL_Z, scene, .012, OUT_EX);
+box(.14, .03, .14, iron, 1.75, RAIL_TOP + .295, RAIL_Z);
+const lanternGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffcf88, transparent:true,
+  depthWrite:false, blending:THREE.AdditiveBlending }));
+lanternGlow.scale.set(.9,.9,1);
+lanternGlow.position.set(1.75, RAIL_TOP + .2, RAIL_Z);
+scene.add(lanternGlow);
+
+/* ================================================================
+   時刻を舞台に流し込む
+================================================================ */
+const _v = new THREE.Vector3(), _c = new THREE.Color();
+const SUN_WHITE = new THREE.Color(0xfff6e0), MOON_LIGHT = new THREE.Color(0xb7c3ff);
+function applyTime(t){
+  evalPalette(t);
+  updateSky(t);
+  const p = cur;
+  const lamps = lampsOn(t), room = roomOn(t);
+  const sunLow = 1 - sstep(0, .35, sunDir.y);   // 太陽が低い（照り返しを強く、温かく）
+
+  toSrgb(skyMat.uniforms.uTop.value, p.skyTop);
+  toSrgb(skyMat.uniforms.uBot.value, p.skyBot);
+  toSrgb(skyMat.uniforms.uGlow.value, p.glow);
+  toSrgb(skyMat.uniforms.uFog.value, p.fog);
+  skyMat.uniforms.uMoonUp.value = moonUp;
+  skyMat.uniforms.uSunUp.value = sunUp;
+
+  toSrgb(seaMat.uniforms.uDeep.value, p.seaDeep);
+  toSrgb(seaMat.uniforms.uLight.value, p.seaLight);
+  toSrgb(seaMat.uniforms.uFog.value, p.fog);
+  toSrgb(seaMat.uniforms.uGlow.value, p.glow);
+  seaMat.uniforms.uSunUp.value = sunUp;
+  seaMat.uniforms.uSunLow.value = sunLow;
+  seaMat.uniforms.uMoonUp.value = moonUp;
+
+  scene.fog.color.copy(p.fog);
+  paintHills(p);
+  starMat.uniforms.uOpacity.value = p.stars;
+
+  // 太陽の円盤：低いほど温かい色。月：満ち欠け
+  _c.copy(SUN_WHITE).lerp(p.glow, sunLow*.85);
+  toSrgb(sunMat.uniforms.uCol.value, _c);
+  sunMat.uniforms.uLow.value = sunLow;
+  sunMat.uniforms.uVis.value = sstep(-.03, .01, sunDir.y);
+  sun.scale.setScalar(ORB_DIST*(.085 + .03*sunLow));
+  moonMat.uniforms.uPhase.value = moonPhase;
+  moonMat.uniforms.uVis.value = moonUp*(.55 + .45*p.stars);
+  moon.scale.setScalar(ORB_DIST*.085);
+
+  // 光：昼は太陽、夜は月
+  hemi.color.copy(p.hemiSky); hemi.groundColor.copy(p.hemiGround); hemi.intensity = p.hemiI;
+  if(sunUp > 0.01){
+    dirLight.color.copy(p.sunColor); dirLight.intensity = p.sunI*sunUp;
+    dirLight.position.copy(sunDir).multiplyScalar(60);
+  } else {
+    dirLight.color.copy(MOON_LIGHT); dirLight.intensity = .45*moonUp;
+    dirLight.position.copy(moonDir).multiplyScalar(60);
+  }
+  roomLight.intensity = 16*room;
+
+  tinted.forEach(o=>o.m.color.copy(p[o.key]));
+  interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
+  clouds.forEach(c=>c.material.color.copy(p.cloud));
+
+  paintWindows(p, litFrac(t), false);
+  lampMat.opacity = lamps;
+  headMat.color.setRGB(1, .81, .52).multiplyScalar(.35 + lamps*.65);
+  beamMat.uniforms.uOp.value = .18*lamps;
+  lanternGlow.material.opacity = lamps*.9;
+  lanternBox.material.color.setRGB(1, .86, .63).multiplyScalar(.5 + lamps*.5);
+  lanternMat.color.setRGB(1, .9, .66).multiplyScalar(.55 + lamps*.45);
+  lhGlow.material.opacity = lamps;
+  boats.forEach(b=>{ b.userData.light.material.opacity = lamps; });
+}
+
+/* ---------- デバッグ表示 ---------- */
+const dbg = document.getElementById('dbg');
+const tSlider = document.getElementById('tSlider'), tLabel = document.getElementById('tLabel');
+if(PARAMS.has('debug')) dbg.classList.add('on');
+function refreshSpeedButtons(){
+  dbg.querySelectorAll('button[data-speed]').forEach(b=>b.setAttribute('aria-pressed', String(+b.dataset.speed === timeSpeed)));
+}
+dbg.querySelectorAll('button[data-speed]').forEach(b=>b.addEventListener('click', ()=>{ timeSpeed = +b.dataset.speed; refreshSpeedButtons(); }));
+tSlider.addEventListener('input', ()=>{ dayT = tSlider.value/1000; timeSpeed = 0; refreshSpeedButtons(); });
+const spotBtn = document.getElementById('spotBtn');
+spotBtn.addEventListener('click', ()=>{ guide.visible = !guide.visible; spotBtn.setAttribute('aria-pressed', String(guide.visible)); });
+refreshSpeedButtons();
+function refreshDebug(){
+  if(!dbg.classList.contains('on')) return;
+  const h = Math.floor(dayT*24), mnt = Math.floor((dayT*24 - h)*60);
+  tLabel.textContent = `${curName} ${String(h).padStart(2,'0')}:${String(mnt).padStart(2,'0')}  月${(moonPhase*100).toFixed(0)}%`;
+  if(document.activeElement !== tSlider) tSlider.value = Math.round(dayT*1000);
+}
+
+/* ---------- カメラ操作 ---------- */
+const EYE_Y = 2.3;
+let baseDist = 4, zoom = 1, yaw = 0, pitch = 0, tYaw = 0, tPitch = 0;
+if(PARAMS.has('yaw')) tYaw = yaw = parseFloat(PARAMS.get('yaw'));
+if(PARAMS.has('pitch')) tPitch = pitch = parseFloat(PARAMS.get('pitch'));
+const hint = document.getElementById('hint');
+let hinted = false;
+function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
+const pointers = new Map();
+let lastPinch = 0;
+canvas.addEventListener('pointerdown', e=>{
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  hideHint();
+});
+canvas.addEventListener('pointermove', e=>{
+  const p = pointers.get(e.pointerId);
+  if(!p) return;
+  if(pointers.size === 1){
+    tYaw = Math.max(-.4, Math.min(.4, tYaw - (e.clientX - p.x)*.0035));
+    tPitch = Math.max(-.28, Math.min(.2, tPitch - (e.clientY - p.y)*.0028));
+  }
+  p.x = e.clientX; p.y = e.clientY;
+  if(pointers.size === 2){
+    const [a,b] = [...pointers.values()];
+    const d = Math.hypot(a.x-b.x, a.y-b.y);
+    if(lastPinch) zoom = Math.max(.72, Math.min(1.12, zoom * (lastPinch / d)));
+    lastPinch = d;
+  }
+});
+function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size < 2) lastPinch = 0; }
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  zoom = Math.max(.72, Math.min(1.12, zoom * (1 + e.deltaY*.0008)));
+  hideHint();
+}, { passive:false });
+
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  const aspect = w / h;
+  camera.aspect = aspect;
+  camera.fov = aspect < 1 ? 70 : 52;
+  camera.updateProjectionMatrix();
+  const vh = camera.fov * Math.PI/180;
+  const hh = 2*Math.atan(Math.tan(vh/2)*aspect);
+  const needW = 1.2 / Math.tan(hh/2);
+  const needH = 1.75 / Math.tan(vh/2);
+  baseDist = Math.max(2.6, Math.min(3.4, Math.max(needW, needH)));
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------- ループ ---------- */
+let last = performance.now(), clock = 0, curtainTick = 0;
+const LOOK = new THREE.Vector3();
+applyTime(dayT);
+paintWindows(cur, litFrac(dayT), true);
+renderer.setAnimationLoop(now=>{
+  const dt = Math.min((now - last)/1000, .05);
+  last = now; clock += dt;
+
+  dayT += dt*timeSpeed/DAY_LEN;
+  if(dayT >= 1){ dayT -= 1; dayCount++; }
+  applyTime(dayT);
+  refreshDebug();
+
+  yaw += (tYaw - yaw)*Math.min(1, dt*5);
+  pitch += (tPitch - pitch)*Math.min(1, dt*5);
+  const sway = Math.sin(clock*.23)*.018*MOTION;
+  const dist = baseDist * zoom;
+  // 見回し：体を横へ寄せて窓の中心を見る。回転は少しだけ足す（回し過ぎると壁しか見えない）
+  camera.position.set(yaw*1.2, EYE_Y + Math.sin(clock*.31)*.01*MOTION, dist);
+  LOOK.set(0, 2.05, 0);
+  camera.lookAt(LOOK);
+  camera.rotateY(yaw*.25 + sway);
+  camera.rotateX(pitch);
+
+  sky.position.copy(camera.position);
+  stars.position.copy(camera.position);
+  hills.position.set(camera.position.x, 0, camera.position.z);
+  sun.position.copy(camera.position).addScaledVector(sunDir, ORB_DIST); sun.lookAt(camera.position);
+  moon.position.copy(camera.position).addScaledVector(moonDir, ORB_DIST); moon.lookAt(camera.position);
+  seaMat.uniforms.uT.value = clock*MOTION;
+  starMat.uniforms.uTime.value = clock;
+
+  clouds.forEach(c=>{
+    c.position.x += c.userData.v*dt;
+    if(c.position.x > 600) c.position.x = -600;
+  });
+  boats.forEach(b=>{
+    const ph = b.userData.phase;
+    b.position.y = SEA_Y + .12 + Math.sin(clock*1.1 + ph)*.06*MOTION;
+    b.rotation.z = Math.sin(clock*.9 + ph)*.05*MOTION;
+  });
+
+  beamPivot.rotation.y = clock*.7*MOTION;
+  {
+    const bx = Math.cos(beamPivot.rotation.y), bz = -Math.sin(beamPivot.rotation.y);
+    const tx = camera.position.x - lhX, tz = camera.position.z - lhZ;
+    const tl = Math.hypot(tx,tz);
+    const facing = Math.max(0, (bx*tx + bz*tz)/tl);
+    const flash = Math.pow(facing, 30);
+    const s = 1.6 + flash*6*beamMat.uniforms.uOp.value/.18;
+    lhGlow.scale.set(s, s, 1);
+  }
+
+  curtainTick += dt;
+  if(curtainTick > 1/30){
+    curtainTick = 0;
+    curtains.forEach(c=>{
+      const pa = c.m.geometry.attributes.position;
+      const arr = pa.array, b = c.base;
+      for(let i=0;i<pa.count;i++){
+        const x = b[i*3], y = b[i*3+1];
+        const u = (x + c.w/2)/c.w;
+        const v = (c.h/2 - y)/c.h;
+        const pleat = Math.sin(u*19)*.035;
+        const wave = Math.sin(u*6 + clock*1.2 + c.sign*2)*.045*v*MOTION;
+        const breeze = (Math.sin(clock*.55 + c.sign) *.5 + .5) * v*v * .09 * MOTION;
+        arr[i*3] = x - c.sign*breeze*.6;
+        arr[i*3+2] = pleat + wave + breeze*.5;
+      }
+      pa.needsUpdate = true;
+      c.m.geometry.computeVertexNormals();
+    });
+  }
+  if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
+
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
