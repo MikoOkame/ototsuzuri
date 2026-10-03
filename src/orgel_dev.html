@@ -334,6 +334,10 @@ scene.add(dirLight);
 const roomLight = new THREE.PointLight(0xffc88a, 0, 14, 1.6);
 roomLight.position.set(2.2, 3.4, 2.6);
 scene.add(roomLight);
+// 窓台のオルゴールを室内側から起こす弱い補助光。昼は外光の照り返し、夜は室内照明に合わせる
+const sillFill = new THREE.PointLight(0xfff1dc, 0, 1.6, 1.2);
+sillFill.position.set(.25, 1.6, .9);
+scene.add(sillFill);
 
 /* ================================================================
    空：グラデーションのドーム＋ノイズの滲み。カメラに追従する。
@@ -989,6 +993,228 @@ rod.rotation.z = Math.PI/2; rod.position.set(0, 3.75, .2); scene.add(rod);
   fn.position.set(x, 3.75, .2); scene.add(fn);
 });
 
+/* ================================================================
+   オルゴール：機構と仮の箱。試作（ref/orgel_mechanism.html）の構成を縮めて窓台に載せる。
+   単位は試作のまま（≒cm）で組み、ORGEL_SCALE で m に落とす。
+   曲データは第3段階で v10 の TRACKS から生成する。今は試作の曲で形だけ回す。
+================================================================ */
+const ORGEL_SCALE = .012;
+const orgelRoot = new THREE.Group();
+orgelRoot.position.set(0, SILL_TOP + .5*ORGEL_SCALE, .06);
+orgelRoot.scale.setScalar(ORGEL_SCALE);
+scene.add(orgelRoot);
+const OUT_MECH = 0x3b2a3c;
+function obox(w,h,d,mat,x,y,z,parent,t){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); parent.add(m);
+  if(t) addOutline(m, t, OUT_MECH);
+  return m;
+}
+const orgel = (()=>{
+  /* 曲データ（試作のワルツ、16小節）。櫛歯18本：G4 から C7 までの全音階 */
+  const SEMI = [0,2,4,5,7,9,10,12,14,16,17,19,21,22,24,26,28,29];
+  const TEETH = SEMI.length;
+  const CH = { C:[3,5,7], Am:[1,3,5], F:[6,8,3], G:[0,2,4], Em:[5,7,2], Dm:[4,6,8] };
+  const BARS = [
+    ['C',[[0,12],[1.5,11],[2,10]]], ['Am',[[0,8],[1,10],[2,12]]], ['F',[[0,13],[1,12],[2,11],[2.5,10]]], ['G',[[0,11],[2,7]]],
+    ['C',[[0,12],[1.5,11],[2,10]]], ['Em',[[0,9],[1,10],[2,12]]], [['F','G'],[[0,13],[1,15],[2,14],[2.5,13]]], ['C',[[0,12],[1,10]]],
+    ['Am',[[0,15],[1,14],[2,12]]], ['Em',[[0,14],[1,12],[2,9]]], ['F',[[0,13],[1,12],[2,10],[2.5,12]]], ['C',[[0,14],[2,12]]],
+    ['Dm',[[0,11],[1,12],[2,13]]], ['G',[[0,14],[1,13],[2,11]]], [['C','G'],[[0,12],[1,10],[2,11],[2.5,9]]], ['C',[[0,10],[1.5,7]]]
+  ];
+  const BEATS = BARS.length*3;
+  const NOTES = [];
+  {
+    const seen = new Set();
+    const add = (b,t)=>{ const k = b+':'+t; if(seen.has(k)) return; seen.add(k); NOTES.push({ beat:b, tooth:t }); };
+    BARS.forEach(([ch, mel], bi)=>{
+      const b0 = bi*3, A = CH[Array.isArray(ch) ? ch[0] : ch], B = CH[Array.isArray(ch) ? ch[1] : ch];
+      mel.forEach(([o,t])=>add(b0+o, t));
+      add(b0, A[0]); add(b0+1, A[1]); add(b0+2, Array.isArray(ch) ? B[0] : A[2]);
+    });
+    NOTES.sort((a,b)=>a.beat-b.beat);
+  }
+
+  /* 素材。櫛と板は灰色寄りの鋼（青紫に寄せると樹脂に見える） */
+  const brass = inToon(0xa98549), brassDk = inToon(0x7f6038);
+  const steel = inToon(0xb6b8bb), steelDk = inToon(0x7a7c80), leadMat = inToon(0x55535c);
+
+  const mechRoot = new THREE.Group(); orgelRoot.add(mechRoot);
+  const mech = new THREE.Group(); mechRoot.add(mech);
+  const BED_BOTTOM = -1.975;
+  mech.position.y = -BED_BOTTOM;
+
+  /* 台座 */
+  obox(11, .35, 9, brassDk, 0, -1.8, .05, mech, .03);
+
+  /* シリンダー */
+  const R = 1.05, CYL_Z = -.8, CYL_LEN = 6.6;
+  const cyl = new THREE.Group(); cyl.position.set(0, 0, CYL_Z); mech.add(cyl);
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(R, R, CYL_LEN, 48), brass);
+  drum.rotation.z = Math.PI/2; cyl.add(drum); addOutline(drum, .03, OUT_MECH);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 9.4, 12), steelDk);
+  axle.rotation.z = Math.PI/2; axle.position.x = .6; cyl.add(axle);
+  /* ピン：曲データから配置。読んでいるピンだけ温かい色に光る */
+  const toothX = i => -3.2 + (i + .5)*(6.4/TEETH);
+  const pins = new THREE.InstancedMesh(new THREE.CylinderGeometry(.05, .05, .26, 6), toon(0xffffff), NOTES.length);
+  const PIN_BASE = new THREE.Color(0xc3c9d6), PIN_HOT = new THREE.Color(0xffd894), _pc = new THREE.Color();
+  {
+    const Mm = new THREE.Matrix4(), Qq = new THREE.Quaternion(), E = new THREE.Euler(), P = new THREE.Vector3(), S1 = new THREE.Vector3(1,1,1);
+    NOTES.forEach((n,i)=>{
+      const psi = -n.beat/BEATS*Math.PI*2, rr = R + .1;
+      P.set(toothX(n.tooth), Math.sin(psi)*rr, Math.cos(psi)*rr);
+      Qq.setFromEuler(E.set(Math.PI/2 - psi, 0, 0));
+      Mm.compose(P, Qq, S1); pins.setMatrixAt(i, Mm);
+      pins.setColorAt(i, PIN_BASE); n.psi = psi;
+    });
+  }
+  cyl.add(pins);
+
+  /* 歯車 */
+  function gearGeo(r, n, depth, hole, windows){
+    const sh = new THREE.Shape(), root = r*.87, step = Math.PI*2/n;
+    for(let i=0;i<n;i++){
+      const a = i*step;
+      [[a, root],[a+step*.18, r],[a+step*.48, r],[a+step*.66, root]].forEach(([ang, rad], k)=>{
+        const x = Math.cos(ang)*rad, y = Math.sin(ang)*rad; (i===0 && k===0) ? sh.moveTo(x,y) : sh.lineTo(x,y);
+      });
+    }
+    sh.closePath();
+    const h = new THREE.Path(); h.absarc(0,0,hole,0,Math.PI*2,true); sh.holes.push(h);
+    if(windows) for(let k=0;k<4;k++){
+      const a = k*Math.PI/2 + Math.PI/4, d = r*.52;
+      const w = new THREE.Path(); w.absarc(Math.cos(a)*d, Math.sin(a)*d, r*.2, 0, Math.PI*2, true); sh.holes.push(w);
+    }
+    const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled:false, curveSegments:10 });
+    g.translate(0,0,-depth/2); g.rotateY(Math.PI/2);
+    return g;
+  }
+  const bigGear = new THREE.Mesh(gearGeo(1.3, 40, .14, .14, true), brass);
+  bigGear.position.x = 3.95; cyl.add(bigGear); addOutline(bigGear, .02, OUT_MECH);
+
+  /* 支柱と側板 */
+  obox(.3, 2.2, 1.3, brassDk, -3.6, -.6, CYL_Z, mech, .025);
+  const plate = new THREE.Shape();
+  plate.moveTo(-2.2,-1.62); plate.lineTo(1.9,-1.62); plate.lineTo(1.9,.6); plate.quadraticCurveTo(1.9,2.8,.4,2.8); plate.lineTo(-1.4,1.3); plate.quadraticCurveTo(-2.2,.9,-2.2,.2); plate.closePath();
+  const plateGeo = new THREE.ExtrudeGeometry(plate, { depth:.22, bevelEnabled:false });
+  plateGeo.translate(0,0,-.11); plateGeo.rotateY(-Math.PI/2);
+  const sidePlate = new THREE.Mesh(plateGeo, brassDk);
+  sidePlate.position.set(3.6, 0, 0); mech.add(sidePlate); addOutline(sidePlate, .025, OUT_MECH);
+
+  /* 輪列と調速機：大歯車 → 中間の歯車（手前上）→ 小歯車（さらに上）→ 羽根は側板の外側の一番上。
+     一か所に重ねず、縦に段をつけて読めるようにする */
+  const S2 = new THREE.Vector3(4.1, 1.45, 1.25);
+  const shaft2 = new THREE.Group(); shaft2.position.copy(S2); mech.add(shaft2);
+  const pin2 = new THREE.Mesh(gearGeo(.45, 12, .2, .06), brass); shaft2.add(pin2); addOutline(pin2, .015, OUT_MECH);
+  const g2 = new THREE.Mesh(gearGeo(.8, 26, .12, .06, true), brass); g2.position.x = .5; shaft2.add(g2); addOutline(g2, .015, OUT_MECH);
+  const a2 = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.4,8), steelDk); a2.rotation.z = Math.PI/2; a2.position.x = .1; shaft2.add(a2);
+  const S3 = new THREE.Vector3(4.6, 2.45, 1.95);
+  const shaft3 = new THREE.Group(); shaft3.position.copy(S3); mech.add(shaft3);
+  const pin3 = new THREE.Mesh(gearGeo(.3, 9, .16, .04), brass); shaft3.add(pin3); addOutline(pin3, .012, OUT_MECH);
+  const a3 = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,2.2,8), steelDk); a3.rotation.z = Math.PI/2; a3.position.x = .5; shaft3.add(a3);
+  const fan = new THREE.Group(); fan.position.x = 1.3; shaft3.add(fan);
+  {
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .16, 12), brassDk);
+    hub.rotation.z = Math.PI/2; fan.add(hub); addOutline(hub, .012, OUT_MECH);
+  }
+  [0, Math.PI].forEach(a=>{
+    const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .7, .45), brass);
+    b.position.set(0, Math.cos(a)*.45, Math.sin(a)*.45); b.rotation.x = -a; fan.add(b); addOutline(b, .015, OUT_MECH);
+  });
+  /* 羽根の軸受け：側板から外へ出た腕 */
+  obox(1.2, .18, .18, brassDk, 4.3, S3.y, S3.z, mech, .012);
+
+  /* 櫛歯。歯の長さは揃え、低音は裏の鉛で調律する */
+  const TIP_Z = CYL_Z + R + .2 - .03, TIP_Y = .05, TL = 2.4;
+  const teeth = [];
+  for(let i=0;i<TEETH;i++){
+    const slot = 6.4/TEETH, x = toothX(i);
+    const pivot = new THREE.Group(); pivot.position.set(x, TIP_Y, TIP_Z + TL); mech.add(pivot);
+    const t = new THREE.Mesh(new THREE.BoxGeometry(slot*.78, .08, TL), steel);
+    t.position.z = -TL/2; pivot.add(t); addOutline(t, .012, OUT_MECH);
+    if(i < 6){
+      const w = new THREE.Mesh(new THREE.BoxGeometry(slot*.66, .14, .55 - i*.05), leadMat);
+      w.position.set(0, -.11, -TL + .45); pivot.add(w); addOutline(w, .01, OUT_MECH);
+    }
+    teeth.push({ pivot, age:99, amp:0 });
+  }
+  /* 櫛の根元の一枚板（鋼）と、それを載せる台（真鍮） */
+  const COMB_ROOT = TIP_Z + TL;
+  obox(6.7, .2, 1.0, steelDk, 0, TIP_Y - .02, COMB_ROOT + .5, mech, .02);
+  { const top = TIP_Y - .12, bot = -1.625; obox(6.1, top - bot, .8, brassDk, 0, (top + bot)/2, COMB_ROOT + .5, mech, .02); }
+  [-2.6, 0, 2.6].forEach(x=>{
+    const sc = new THREE.Mesh(new THREE.CylinderGeometry(.13, .13, .06, 14), brass);
+    sc.position.set(x, TIP_Y + .11, COMB_ROOT + .55); mech.add(sc); addOutline(sc, .012, OUT_MECH);
+  });
+
+  /* ゼンマイの香箱 */
+  const barrel = new THREE.Group(); barrel.position.set(-2.4, -1.625, -3.2); mech.add(barrel);
+  const drumB = new THREE.Mesh(new THREE.CylinderGeometry(.95, .95, 1.25, 32), brassDk);
+  drumB.position.y = .625; barrel.add(drumB); addOutline(drumB, .025, OUT_MECH);
+  const ratchet = new THREE.Mesh(gearGeo(.6, 16, .1, .1), brass);
+  ratchet.rotation.z = Math.PI/2; ratchet.position.y = 1.3; barrel.add(ratchet); addOutline(ratchet, .015, OUT_MECH);
+  const click = obox(.5, .08, .12, steelDk, -2.4 + .75, -1.625 + 1.34, -3.2 + .45, mech, .012);
+  click.rotation.y = .5;
+
+  /* 仮の箱（ユーザーの .glb が届いたら差し替える） */
+  const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xbca6c8);
+  const boxRoot = new THREE.Group(); orgelRoot.add(boxRoot);
+  const IW = 6.1, ID = 5.0, WT = .5, WH = 5.4;
+  obox(IW*2 + WT*2, .5, ID*2 + WT*2, wood, 0, -.25, 0, boxRoot, .03);
+  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, ID + WT/2, boxRoot, .03);
+  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, -ID - WT/2, boxRoot, .03);
+  obox(WT, WH, ID*2, wood, IW + WT/2, WH/2 - .5 + .25, 0, boxRoot, .03);
+  obox(WT, WH, ID*2, wood, -IW - WT/2, WH/2 - .5 + .25, 0, boxRoot, .03);
+  /* 銘板：壁に埋め込んで面一にする（浮かせると上から見たとき剥がれた板に見える） */
+  obox(2.2, .9, .12, inlay, 0, 2.4, ID + WT - .05, boxRoot, 0);
+  const keyhole = new THREE.Mesh(new THREE.CircleGeometry(.13, 16), new THREE.MeshBasicMaterial({ color:0x4a3346 }));
+  keyhole.position.set(0, 2.45, ID + WT + .012); boxRoot.add(keyhole);
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+    const f = new THREE.Mesh(new THREE.SphereGeometry(.38, 14, 10), woodDk);
+    f.scale.y = .6; f.position.set(sx*(IW + WT - .5), -.55, sz*(ID + WT - .5)); boxRoot.add(f);
+  });
+  const lidPivot = new THREE.Group(); lidPivot.position.set(0, WH - .25, -ID - WT); boxRoot.add(lidPivot);
+  const LD = ID*2 + WT*2 + .2;
+  obox(IW*2 + WT*2 + .2, .6, LD, wood, 0, .3, LD/2 - .1, lidPivot, .03);
+  obox((IW*2)*.7, .03, LD*.62, inlay, 0, .615, LD/2 - .1, lidPivot, .01);
+  const lin = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - .2, ID*2 - .2), lining);
+  lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin);
+  lidPivot.rotation.x = -1.75;   // 蓋は開けたまま
+
+  /* 回転。第3段階で曲のループ長と発音に同期させる。今は仮に30秒で1回転 */
+  const TURN_SEC = 30;
+  let beatPos = 0;
+  function strikeBetween(a, b){
+    for(const n of NOTES){
+      const hit = b >= a ? (n.beat > a && n.beat <= b) : (n.beat > a || n.beat <= b);
+      if(hit){ const tt = teeth[n.tooth]; tt.age = 0; tt.amp = .09; }
+    }
+  }
+  function update(dt){
+    const prev = beatPos;
+    beatPos = (beatPos + dt/TURN_SEC*BEATS) % BEATS;
+    strikeBetween(prev, beatPos);
+    const ang = beatPos/BEATS*Math.PI*2;
+    cyl.rotation.x = -ang;
+    const w2 = ang*(1.3/.45);
+    shaft2.rotation.x = w2;
+    shaft3.rotation.x = -w2*(.8/.3);
+    fan.rotation.x = -w2*(.8/.3)*5;
+    barrel.rotation.y -= dt/TURN_SEC*BEATS*.02;
+    for(let i=0;i<NOTES.length;i++){
+      let w = NOTES[i].psi + ang;
+      w = Math.atan2(Math.sin(w), Math.cos(w));
+      const hot = w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0;
+      pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_HOT, hot));
+    }
+    pins.instanceColor.needsUpdate = true;
+    for(const t of teeth){
+      t.age += dt;
+      t.pivot.rotation.x = t.age < 3 ? t.amp*Math.exp(-t.age*9)*Math.sin(t.age*70) : 0;
+    }
+  }
+  return { update };
+})();
+
 /* ---------- ベランダ ---------- */
 const iron = toon(0x3e3552);
 const RAIL_Z = -1.65, RAIL_TOP = 1.15, BAL_Y = .2;
@@ -1078,6 +1304,7 @@ function applyTime(t){
     dirLight.position.copy(moonDir).multiplyScalar(60);
   }
   roomLight.intensity = 16*room;
+  sillFill.intensity = .3*(sunUp*.5 + .5) + .35*room;
 
   tinted.forEach(o=>o.m.color.copy(p[o.key]));
   interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
@@ -1115,7 +1342,9 @@ function refreshDebug(){
 
 /* ---------- カメラ操作 ---------- */
 const EYE_Y = 2.3;
+const ZOOM_MIN = .075;  // ここまで寄ると機構が画面の半分ほどになる
 let baseDist = 4, zoom = 1, yaw = 0, pitch = 0, tYaw = 0, tPitch = 0;
+if(PARAMS.has('zoom')) zoom = parseFloat(PARAMS.get('zoom'));
 if(PARAMS.has('yaw')) tYaw = yaw = parseFloat(PARAMS.get('yaw'));
 if(PARAMS.has('pitch')) tPitch = pitch = parseFloat(PARAMS.get('pitch'));
 const hint = document.getElementById('hint');
@@ -1139,7 +1368,7 @@ canvas.addEventListener('pointermove', e=>{
   if(pointers.size === 2){
     const [a,b] = [...pointers.values()];
     const d = Math.hypot(a.x-b.x, a.y-b.y);
-    if(lastPinch) zoom = Math.max(.72, Math.min(1.12, zoom * (lastPinch / d)));
+    if(lastPinch) zoom = Math.max(ZOOM_MIN, Math.min(1.12, zoom * (lastPinch / d)));
     lastPinch = d;
   }
 });
@@ -1148,7 +1377,7 @@ canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
-  zoom = Math.max(.72, Math.min(1.12, zoom * (1 + e.deltaY*.0008)));
+  zoom = Math.max(ZOOM_MIN, Math.min(1.12, zoom * (1 + e.deltaY*.0008)));
   hideHint();
 }, { passive:false });
 
@@ -1186,8 +1415,10 @@ renderer.setAnimationLoop(now=>{
   pitch += (tPitch - pitch)*Math.min(1, dt*5);
   const dist = baseDist * zoom;
   // 見回し：体を横へ寄せて窓の中心を見る。回転は少しだけ足す（回し過ぎると壁しか見えない）
-  camera.position.set(yaw*1.2, EYE_Y, dist);
-  LOOK.set(0, 2.05, 0);
+  // 寄るほど目線を下げ、見る先を窓の中心からオルゴールへ移す
+  const close = sstep(.72, ZOOM_MIN, zoom);
+  camera.position.set(yaw*1.2*(1 - close*.7), EYE_Y - close*1.0, dist);
+  LOOK.set(0, 2.05 - close*(2.05 - (SILL_TOP + .04)), close*.04);
   camera.lookAt(LOOK);
   camera.rotateY(yaw*.25);
   camera.rotateX(pitch);
@@ -1241,6 +1472,7 @@ renderer.setAnimationLoop(now=>{
       c.m.geometry.computeVertexNormals();
     });
   }
+  orgel.update(dt);
   if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
 
   renderer.render(scene, camera);
