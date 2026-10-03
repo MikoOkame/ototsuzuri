@@ -145,6 +145,8 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const MOTION = reduceMotion ? 0.25 : 1;
@@ -1711,6 +1713,82 @@ lanternGlow.position.set(1.75, RAIL_TOP + .2, RAIL_Z);
 scene.add(lanternGlow);
 
 /* ================================================================
+   鳥：assets/bird_mdl の28クリップ版。モデルは共通で、テクスチャだけ鳥ごとに差し替える。
+   第4段階の最初は、輪郭線なし／輪郭線あり（モデル同梱）／輪郭線なし＋コード側の輪郭線 の
+   3羽を手すりに並べて比較する（どれを使うかはユーザーが決める）。
+================================================================ */
+const ASSET_BASE = '../assets/';
+const BIRD_FILES = { plain:'bird_mdl/glb/MyBird_v1.1_notex.glb', outline:'bird_mdl/glb/MyBird_v1.1_outline_notex.glb' };
+const BIRD_TEX_IDS = ['01_shiro','02_shirube','03_momo','04_sumire','05_minamo','06_sora','07_kinako','08_ame','09_kurumi','10_hoshi','11_tsuki'];
+const birdTexCache = {};
+function birdTex(id){
+  if(!birdTexCache[id]){
+    const t = new THREE.TextureLoader().load(ASSET_BASE + 'bird_mdl/texture/tex_bird_' + id + '.png');
+    t.colorSpace = THREE.SRGBColorSpace; t.flipY = false;
+    birdTexCache[id] = t;
+  }
+  return birdTexCache[id];
+}
+const birdSrc = {};          // 読み込んだ glb（複製の元）
+const birds = [];            // 置いた鳥
+const BIRD_OUTLINE_COL = 0x4a3a44;
+function makeBird(variant, texId, codeOutline){
+  const src = birdSrc[variant]; if(!src) return null;
+  const model = SkeletonUtils.clone(src.scene);
+  let body = null, outline = null;
+  model.traverse(o=>{
+    if(!o.isSkinnedMesh) return;
+    if(/outline/i.test(o.name)){
+      outline = o;
+      o.material = new THREE.MeshBasicMaterial({ color:BIRD_OUTLINE_COL });
+    } else {
+      body = o;
+      o.material = new THREE.MeshToonMaterial({ map:birdTex(texId), gradientMap:gradMap });
+      o.frustumCulled = false;
+    }
+  });
+  // コード側の輪郭線：同じ骨を共有する複製を、法線方向に押し出して裏面だけ描く
+  if(codeOutline && body){
+    const o = new THREE.SkinnedMesh(body.geometry, new THREE.MeshBasicMaterial({ color:BIRD_OUTLINE_COL, side:THREE.BackSide }));
+    o.material.onBeforeCompile = sh=>{
+      sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n transformed += normalize(objectNormal) * 0.004;');
+    };
+    o.bind(body.skeleton, body.bindMatrix);
+    o.frustumCulled = false;
+    body.parent.add(o);
+    outline = o;
+  }
+  const mixer = new THREE.AnimationMixer(model);
+  const clips = {}; for(const c of src.animations) clips[c.name] = c;
+  const bird = { model, mixer, clips, body, outline, current:null };
+  bird.play = (name, fade=.25)=>{
+    const c = clips[name]; if(!c) return;
+    const a = mixer.clipAction(c);
+    if(bird.current && bird.current !== a){ a.reset().play(); bird.current.crossFadeTo(a, fade, false); }
+    else a.reset().play();
+    bird.current = a;
+  };
+  scene.add(model); birds.push(bird);
+  return bird;
+}
+async function loadBirds(){
+  const loader = new GLTFLoader();
+  for(const k in BIRD_FILES) birdSrc[k] = await loader.loadAsync(ASSET_BASE + BIRD_FILES[k]);
+  // 比較用の3羽。手すりの上、部屋の方を向いて
+  const a = makeBird('plain', '01_shiro', false);   a.model.position.set(-.46, SILL_TOP, .1);  a.model.rotation.y = Math.PI*.35;  a.play('idle');
+  const b = makeBird('outline', '03_momo', false);  b.model.position.set(.46, SILL_TOP, .1);   b.model.rotation.y = -Math.PI*.35; b.play('idle');
+  const c = makeBird('plain', '06_sora', true);     c.model.position.set(-.3, RAIL_TOP + .035, RAIL_Z); c.model.rotation.y = Math.PI*.8; c.play('preen');
+  if(PARAMS.has('birdcmp')){   // 比較撮影：箱を消して3羽をオルゴールの場所に並べる
+    orgelRoot.visible = false;
+    a.model.position.set(-.3, SILL_TOP, .1); a.model.rotation.y = Math.PI*.25; a.play('idle');
+    b.model.position.set(0, SILL_TOP, .18);   b.model.rotation.y = 0;           b.play('idle');
+    c.model.position.set(.3, SILL_TOP, .1);  c.model.rotation.y = -Math.PI*.25; c.play('idle');
+  }
+}
+loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
+
+
+/* ================================================================
    時刻を舞台に流し込む
 ================================================================ */
 const _v = new THREE.Vector3(), _c = new THREE.Color();
@@ -1819,6 +1897,8 @@ if(PARAMS.has('az')) ORBIT.az = ORBIT.cAz = THREE.MathUtils.degToRad(parseFloat(
 if(PARAMS.has('el')) ORBIT.el = ORBIT.cEl = THREE.MathUtils.degToRad(parseFloat(PARAMS.get('el')));
 if(PARAMS.has('dist')) ORBIT.dist = ORBIT.cDist = parseFloat(PARAMS.get('dist'));
 if(PARAMS.has('pany')) ORBIT.pan.y = ORBIT.cPan.y = parseFloat(PARAMS.get('pany'));
+if(PARAMS.has('panx')) ORBIT.pan.x = ORBIT.cPan.x = parseFloat(PARAMS.get('panx'));
+if(PARAMS.has('panz')) ORBIT.pan.z = ORBIT.cPan.z = parseFloat(PARAMS.get('panz'));
 const hint = document.getElementById('hint');
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
@@ -1957,6 +2037,7 @@ renderer.setAnimationLoop(now=>{
     });
   }
   orgel.update(dt);
+  for(const b of birds) b.mixer.update(dt);
   if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
 
   renderer.render(scene, camera);
