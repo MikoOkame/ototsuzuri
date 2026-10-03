@@ -1835,25 +1835,25 @@ const ASSET_BASE = '../assets/';
 const BIRD_FILES = { plain:'bird_mdl/glb/MyBird_v1.1_notex.glb', outline:'bird_mdl/glb/MyBird_v1.1_outline_notex.glb' };
 const BIRD_TEX_IDS = ['01_shiro','02_shirube','03_momo','04_sumire','05_minamo','06_sora','07_kinako','08_ame','09_kurumi','10_hoshi','11_tsuki'];
 const birdTexCache = {};
+// テクスチャは届くまで待つ（届く前にマテリアルを作ると、到着後も黒いままになることがある）
 function birdTex(id){
   if(!birdTexCache[id]){
-    const t = new THREE.TextureLoader().load(ASSET_BASE + 'bird_mdl/texture/tex_bird_' + id + '.png');
-    t.colorSpace = THREE.SRGBColorSpace; t.flipY = false;
-    birdTexCache[id] = t;
+    birdTexCache[id] = new THREE.TextureLoader().loadAsync(ASSET_BASE + 'bird_mdl/texture/tex_bird_' + id + '.png')
+      .then(t=>{ t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; return t; });
   }
   return birdTexCache[id];
 }
 const birdSrc = {};          // 読み込んだ glb（複製の元）
 const birds = [];            // 置いた鳥
 const BIRD_VARIANT = 'plain';   // 'plain'（輪郭線なし）／'outline'（輪郭線あり版）。今は輪郭線なし
-function makeBird(texId, idx){
+function makeBird(texId, idx, tex){
   const src = birdSrc[BIRD_VARIANT]; if(!src) return null;
   const model = SkeletonUtils.clone(src.scene);
   let body = null;
   model.traverse(o=>{
     if(!o.isSkinnedMesh) return;
     if(/outline/i.test(o.name)){ o.material = new THREE.MeshBasicMaterial({ color:0x4a3a44 }); }
-    else { body = o; o.material = new THREE.MeshToonMaterial({ map:birdTex(texId), gradientMap:gradMap }); }
+    else { body = o; o.material = new THREE.MeshToonMaterial({ map:tex, gradientMap:gradMap }); o.material.needsUpdate = true; }
     o.frustumCulled = false;
   });
   const mixer = new THREE.AnimationMixer(model);
@@ -2008,12 +2008,16 @@ function pickBird(clientX, clientY){
 
 async function loadBirds(){
   const loader = new GLTFLoader();
-  birdSrc[BIRD_VARIANT] = await loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]);
+  // モデルとテクスチャを全部待ってから出す（途中で出すと黒い鳥が居座る）
+  const [glb, tA, tB, tC] = await Promise.all([
+    loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]), birdTex('01_shiro'), birdTex('03_momo'), birdTex('06_sora')
+  ]);
+  birdSrc[BIRD_VARIANT] = glb;
   // 仮の3羽：手すりの上に2羽、窓台の端に1羽。オルゴールの方を向く
   // モデルの正面は +z。rotation.y = 0 で部屋（カメラ）の方を向く
-  const a = makeBird('01_shiro', 0); a.model.position.set(-.42, RAIL_TOP + .035, RAIL_Z); a.model.rotation.y = .3;
-  const b = makeBird('03_momo', 1);  b.model.position.set(.42, RAIL_TOP + .035, RAIL_Z);  b.model.rotation.y = -.3;
-  const c = makeBird('06_sora', 2);  c.model.position.set(.52, SILL_TOP, .2);             c.model.rotation.y = -Math.PI/4;   // 体は斜め45°。カーテン（x≥.875）に掛からない位置
+  const a = makeBird('01_shiro', 0, tA); a.model.position.set(-.42, RAIL_TOP + .035, RAIL_Z); a.model.rotation.y = .3;
+  const b = makeBird('03_momo', 1, tB); b.model.position.set(.42, RAIL_TOP + .035, RAIL_Z);  b.model.rotation.y = -.3;
+  const c = makeBird('06_sora', 2, tC); c.model.position.set(.52, SILL_TOP, .2);             c.model.rotation.y = -Math.PI/4;   // 体は斜め45°。カーテン（x≥.875）に掛からない位置
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.model.position).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
   for(const bd of birds){ bd.night = birdNight(dayT) > .5; bd.state = bd.night ? 'sit' : 'idle'; bd.play(bd.state); bd.wait = Math.random()*3; }
 }
