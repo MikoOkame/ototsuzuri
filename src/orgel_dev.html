@@ -617,9 +617,11 @@ const seaMat = new THREE.ShaderMaterial({
       float big=fbm3(q*.005+vec2(t*.012,0.));
       float mid=fbm(q*.022+vec2(t*.02,t*.03));
       vec3 col=mix(uDeep,uLight,smoothstep(.3,.72,big));
+      // 中くらいの模様（顔料の溜まり・明るい斑）。見下ろすと汚れに見えるので静かな海では消す
+      float midK=1.-uCalm*.9;
       float edge=1.-smoothstep(0.,.035,abs(mid-.52));
-      col=mix(col,uDeep*.88,edge*.3);
-      col=mix(col,uLight*1.03,smoothstep(.55,.75,mid)*.3);
+      col=mix(col,uDeep*.88,edge*.3*midK);
+      col=mix(col,uLight*1.03,smoothstep(.55,.75,mid)*.3*midK);
       float r1=fbm3(vec2(q.x*.07,q.y*.24)+vec2(t*.35,t*.12));
       float r2=fbm3(vec2(q.x*.22,q.y*.08)+vec2(-t*.22,t*.3));
       float fine=1.-uCalm*.7;
@@ -1816,6 +1818,7 @@ const ORBIT_CENTER = new THREE.Vector3(0, SILL_TOP + .05, .06);   // オルゴ�
 if(PARAMS.has('az')) ORBIT.az = ORBIT.cAz = THREE.MathUtils.degToRad(parseFloat(PARAMS.get('az')));
 if(PARAMS.has('el')) ORBIT.el = ORBIT.cEl = THREE.MathUtils.degToRad(parseFloat(PARAMS.get('el')));
 if(PARAMS.has('dist')) ORBIT.dist = ORBIT.cDist = parseFloat(PARAMS.get('dist'));
+if(PARAMS.has('pany')) ORBIT.pan.y = ORBIT.cPan.y = parseFloat(PARAMS.get('pany'));
 const hint = document.getElementById('hint');
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
