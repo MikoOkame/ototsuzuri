@@ -151,29 +151,29 @@ const KEYS = [
     skyTop:0x5a6aa8, skyBot:0xf1c9b4, glow:0xffb98a, fog:0xd9c9c9,
     seaDeep:0x4f6893, seaLight:0xa8b4c8, hills:[0x8f9ab8,0x74809f,0x5e6a8a], cloud:0xe8c9c6,
     hemiSky:0xc9c7de, hemiGround:0x6a6480, hemiI:1.2, sunColor:0xffd3b0, sunI:1.0,
-    stars:.25, inLight:0x6c6a80, ground:0x7a7693, island:0x777aa0, glass:0x9ca6c8 },
+    stars:.25, inLight:0x6c6a80, ground:0x7a7693, glass:0x9ca6c8 },
   { t:.18, name:'朝',
     skyTop:0x7fa8d8, skyBot:0xf3e4cf, glow:0xfff0cc, fog:0xe6e1d2,
     seaDeep:0x6f9fae, seaLight:0xbfd5cf, hills:[0xb7c6c4,0x9bb0b0,0x80999a], cloud:0xfffaf2,
     hemiSky:0xe8eef5, hemiGround:0xa8b0c8, hemiI:1.8, sunColor:0xfff1d6, sunI:2.2,
-    stars:0, inLight:0xaaa49c, ground:0x8f9a86, island:0x8e9fb0, glass:0xb9c9d8 },
+    stars:0, inLight:0xaaa49c, ground:0x8f9a86, glass:0xb9c9d8 },
   { t:.42, name:'昼',
     skyTop:0xf4c49a, skyBot:0xf2e5c9, glow:0xffd9a8, fog:0xf0e2c6,
     seaDeep:0x7fa3a0, seaLight:0xc2d3c2, hills:[0xc2cfb2,0xa7bca6,0x87a39a], cloud:0xfff6e8,
     hemiSky:0xfbe6cc, hemiGround:0xc6bff4, hemiI:1.7, sunColor:0xffe4c0, sunI:1.8,
-    stars:0, inLight:0xb8b2a8, ground:0x9aa88c, island:0x93a89c, glass:0xc6d3c9 },
+    stars:0, inLight:0xb8b2a8, ground:0x9aa88c, glass:0xc6d3c9 },
   { t:.66, name:'夕方',
     skyTop:0x6a6eae, skyBot:0xffd3a2, glow:0xffb070, fog:0xefbba1,
     seaDeep:0x4d6098, seaLight:0xc3919e, hills:[0xa08aa6,0x7f6d92,0x68587e], cloud:0xf4baae,
     hemiSky:0xf2c4b5, hemiGround:0x6b5b7b, hemiI:1.3, sunColor:0xffc79f, sunI:1.6,
-    stars:.1, inLight:0x8c8088, ground:0x8e80a1, island:0x8c7ba7, glass:0xcaa0a8 },
+    stars:.1, inLight:0x8c8088, ground:0x8e80a1, glass:0xcaa0a8 },
   { t:.85, name:'夜',
     skyTop:0x0e0c2e, skyBot:0x3a3870, glow:0x8d8fc0, fog:0x3f3b6a,
     seaDeep:0x111b44, seaLight:0x28356d, hills:[0x2f2f5e,0x262650,0x1e1e42], cloud:0x4a4878,
     hemiSky:0x5c62a8, hemiGround:0x221c3a, hemiI:.7, sunColor:0xb7c3ff, sunI:.5,
-    stars:1, inLight:0x3a3850, ground:0x3e3c68, island:0x30305c, glass:0x2e2d55 },
+    stars:1, inLight:0x3a3850, ground:0x3e3c68, glass:0x2e2d55 },
 ];
-const COLOR_KEYS = ['skyTop','skyBot','glow','fog','seaDeep','seaLight','cloud','hemiSky','hemiGround','sunColor','inLight','ground','island','glass'];
+const COLOR_KEYS = ['skyTop','skyBot','glow','fog','seaDeep','seaLight','cloud','hemiSky','hemiGround','sunColor','inLight','ground','glass'];
 const NUM_KEYS = ['hemiI','sunI','stars'];
 function makePal(src){
   const p = { hills:[] };
@@ -469,9 +469,9 @@ scene.add(moon);
    海の先は水平線にしたいので、正面は低く、左右の端ほど高くする。
 ================================================================ */
 const HILLS = [
-  { r:620, h:62, seed:1.3, bias:-.05 },
-  { r:560, h:46, seed:4.1, bias:-.15 },
-  { r:500, h:32, seed:7.7, bias:-.35 },
+  { r:900, h:60, seed:1.3, bias:-.05, fade:.8 },
+  { r:820, h:46, seed:4.1, bias:-.15, fade:.65 },
+  { r:740, h:32, seed:7.7, bias:-.30, fade:.5 },
 ];
 const hills = new THREE.Group();
 const hillMeshes = [];
@@ -480,16 +480,17 @@ for(const L of HILLS){
   for(let i=0;i<=N;i++){
     const a = i/N*Math.PI*2;
     let n = 0.55*Math.sin(a*3+L.seed) + 0.30*Math.sin(a*7+L.seed*2.3)
-          + 0.18*Math.sin(a*13+L.seed*5.1) + 0.07*Math.sin(a*29+L.seed*9.7);
+          + 0.18*Math.sin(a*13+L.seed*5.1) + 0.11*Math.sin(a*29+L.seed*9.7)
+          + 0.07*Math.sin(a*61+L.seed*3.3) + 0.04*Math.sin(a*131+L.seed*7.9);
     n = Math.max(0, n*0.5+0.5+L.bias);
-    // 視線（-z）からの方位。正面 ±22° は水平線のまま、60° で山の高さが出切る
+    // 視線（-z）からの方位。正面は低くなだらかに、横へ行くほど高く
     let da = a + Math.PI/2; da = Math.atan2(Math.sin(da), Math.cos(da));
-    const side = sstep(.38, 1.05, Math.abs(da));
-    const h = (L.h * Math.pow(n,1.4) + 3) * side;
+    const side = .6 + .4*sstep(.3, 1.1, Math.abs(da));
+    const h = (L.h * Math.pow(n,1.1) + 2) * side;
     const x = Math.cos(a)*L.r, z = Math.sin(a)*L.r;
     pos.push(x,h,z, x,-60,z);
     col.push(0,0,0, 0,0,0);
-    mask.push(side, 0);
+    mask.push(side*L.fade, 0);
     if(i<N){ const k=i*2; idx.push(k,k+1,k+2, k+1,k+3,k+2); }
   }
   const g = new THREE.BufferGeometry();
@@ -507,8 +508,8 @@ function paintHills(p){
   hillMeshes.forEach((H, li)=>{
     const top = p.hills[li], fog = p.fog, ca = H.m.geometry.attributes.color;
     for(let i=0;i<ca.count;i++){
-      // 下端は霧色、上端は山の色。正面の低い部分は上端も霧色へ寄せて線を消す
-      _hc.copy(fog).lerp(top, H.mask[i]*.9);
+      // 下端は霧色、上端も霧色に大きく寄せて、水平線の向こうにうっすら見える程度にする
+      _hc.copy(fog).lerp(top, H.mask[i]);
       ca.setXYZ(i, _hc.r, _hc.g, _hc.b);
     }
     ca.needsUpdate = true;
@@ -683,14 +684,6 @@ gGeo.translate(0, 0, -52);
 }
 scene.add(new THREE.Mesh(gGeo, groundMat));
 
-/* 島影 */
-const islandMat = tintToon('island');
-[[-120,-230,40,9],[-60,-260,26,6],[70,-240,55,11],[150,-280,34,7],[20,-300,20,4]].forEach(([x,z,r,h])=>{
-  const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 9), islandMat);
-  m.position.set(x, SEA_Y + h/2 - .6, z);
-  m.scale.z = .45;
-  scene.add(m);
-});
 
 /* ---------- 町並み ---------- */
 const WALLS = [0xf1e6d4,0xf2d4d0,0xd3e0ef,0xd6e8dc,0xe2d6ef,0xf3e5c4,0xe9e2ea];
@@ -1191,13 +1184,12 @@ renderer.setAnimationLoop(now=>{
 
   yaw += (tYaw - yaw)*Math.min(1, dt*5);
   pitch += (tPitch - pitch)*Math.min(1, dt*5);
-  const sway = Math.sin(clock*.23)*.018*MOTION;
   const dist = baseDist * zoom;
   // 見回し：体を横へ寄せて窓の中心を見る。回転は少しだけ足す（回し過ぎると壁しか見えない）
-  camera.position.set(yaw*1.2, EYE_Y + Math.sin(clock*.31)*.01*MOTION, dist);
+  camera.position.set(yaw*1.2, EYE_Y, dist);
   LOOK.set(0, 2.05, 0);
   camera.lookAt(LOOK);
-  camera.rotateY(yaw*.25 + sway);
+  camera.rotateY(yaw*.25);
   camera.rotateX(pitch);
 
   sky.position.copy(camera.position);
