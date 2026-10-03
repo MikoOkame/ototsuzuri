@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>オルゴールの中身｜試作</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    --bg1:#2a2550; --bg2:#5a4f82; --ink:#fff4dc; --ink-dim:rgba(255,244,220,.72);
+    --panel:rgba(30,24,58,.55); --line:rgba(255,228,196,.28);
+    --accent:#ffd494; --accent-ink:#3a2a30;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){ --bg1:#2a2550; --bg2:#5a4f82; --ink:#fff4dc; }
+  }
+  :root[data-theme="dark"]{ --bg1:#2a2550; --bg2:#5a4f82; --ink:#fff4dc; }
+  *,*::before,*::after{ box-sizing:inherit; }
+  html{ height:100%; scroll-padding-top:env(safe-area-inset-top,0px); }
+  body{
+    margin:0; height:100%; overflow:hidden; color:var(--ink);
+    background:radial-gradient(ellipse 90% 70% at 50% 40%, var(--bg2), var(--bg1));
+    font-family:'Zen Maru Gothic',"Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif;
+    touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  #c{ position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
+  #paper{
+    position:fixed; inset:0; pointer-events:none; opacity:.28; mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .52  0 0 0 0 .47  0 0 0 0 .44  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  #tag{ position:fixed; top:0; left:0; padding:calc(16px + env(safe-area-inset-top,0px)) 20px 0; pointer-events:none; }
+  #tag h1{ margin:0; font-size:19px; font-weight:700; letter-spacing:.1em; }
+  #tag p{ margin:4px 0 0; font-size:12px; color:var(--ink-dim); letter-spacing:.06em; }
+  #specBtn{ position:fixed; top:0; right:16px; margin-top:calc(14px + env(safe-area-inset-top,0px)); }
+  .pill{
+    font-family:inherit; font-size:13.5px; font-weight:500; color:var(--ink);
+    background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:9px 15px;
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); cursor:pointer; white-space:nowrap;
+  }
+  .pill[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
+  .pill:disabled{ opacity:.4; cursor:default; }
+  button:focus-visible, label:focus-within{ outline:2px solid var(--accent); outline-offset:2px; }
+  #dock{
+    position:fixed; left:0; right:0; bottom:0; display:flex; flex-direction:column; align-items:center; gap:8px;
+    padding:0 12px calc(16px + env(safe-area-inset-bottom,0px)); pointer-events:none;
+  }
+  .row{ display:flex; flex-wrap:wrap; justify-content:center; gap:6px; pointer-events:auto; }
+  #status{ margin:0; font-size:12px; color:var(--ink-dim); text-align:center; min-height:1em; pointer-events:none; max-width:36em; }
+  #fileLbl input{ position:absolute; width:1px; height:1px; opacity:0; }
+  #heightRow{ display:none; align-items:center; gap:8px; font-size:12.5px; }
+  #heightRow input{ width:140px; accent-color:#ffd494; }
+  #spec{
+    position:fixed; top:0; right:12px; left:12px; margin:calc(60px + env(safe-area-inset-top,0px)) auto 0;
+    max-width:420px; max-height:60vh; overflow:auto; padding:16px 18px; border-radius:18px;
+    background:rgba(28,22,52,.9); border:1px solid var(--line); font-size:13px; line-height:1.75; display:none;
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); pointer-events:auto; touch-action:pan-y;
+  }
+  #spec h2{ margin:0 0 6px; font-size:14.5px; }
+  #spec dl{ margin:0; }
+  #spec dt{ font-weight:700; margin-top:10px; color:var(--accent); }
+  #spec dd{ margin:2px 0 0; }
+  #spec code{ font-family:inherit; background:rgba(255,255,255,.1); padding:1px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="オルゴールの機構の3Dモデル"></canvas>
+<div id="paper"></div>
+
+<header id="tag">
+  <h1>オルゴールの中身</h1>
+  <p>試作｜箱は差し替えできます</p>
+</header>
+<button id="specBtn" class="pill" aria-pressed="false" aria-controls="spec">差し替えの仕様</button>
+
+<section id="spec" aria-label="箱モデルの差し替え仕様">
+  <h2>自作の箱に差し替えるときの決まり</h2>
+  <dl>
+    <dt>形式</dt>
+    <dd><code>.glb</code> を1ファイルで。テクスチャは埋め込みにしてください。</dd>
+    <dt>寸法</dt>
+    <dd>機構の外形は 幅11 × 奥行9 × 高さ約5 cm。内寸はこれより一回り大きく。単位はメートルでもセンチでも自動で判別します。</dd>
+    <dt>向き</dt>
+    <dd>正面は +Z 方向（Blenderでは −Y が正面として書き出されます）。上は +Y。</dd>
+    <dt>機構の位置</dt>
+    <dd>空のオブジェクトを <code>MechAnchor</code> という名前で置くと、その位置に機構の底面中心が合います。無い場合は箱の中央に置き、高さをスライダーで合わせられます。</dd>
+    <dt>蓋</dt>
+    <dd>蓋のオブジェクト名に <code>Lid</code> を含めてください。原点を蝶番の位置に置き、ローカルX軸まわりに開きます。</dd>
+    <dt>質感</dt>
+    <dd>読み込んだ箱は、色とテクスチャを保ったまま3段階のトゥーン陰影に変換します。</dd>
+  </dl>
+</section>
+
+<div id="dock">
+  <p id="status" aria-live="polite">仮の箱を表示中</p>
+  <div id="heightRow" class="row">
+    <span>機構の高さ</span><input id="heightSlider" type="range" min="-4" max="6" step="0.05" value="0" aria-label="機構の高さ">
+  </div>
+  <div class="row">
+    <button id="playBtn" class="pill" aria-pressed="false">再生</button>
+    <button id="windBtn" class="pill" disabled>ゼンマイを切らす</button>
+    <button id="rewindBtn" class="pill">巻き直す</button>
+  </div>
+  <div class="row">
+    <button id="lidBtn" class="pill" aria-pressed="true">蓋をしめる</button>
+    <button id="xrayBtn" class="pill" aria-pressed="false">箱を隠す</button>
+    <label id="fileLbl" class="pill">箱を読み込む<input id="fileIn" type="file" accept=".glb,.gltf"></label>
+    <button id="resetBtn" class="pill" disabled>仮の箱に戻す</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* ================= 基本 ================= */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+renderer.setPixelRatio(DPR);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
+
+const gradMap = new THREE.DataTexture(new Uint8Array([95,95,95,255, 175,175,175,255, 255,255,255,255]), 3, 1, THREE.RGBAFormat);
+gradMap.minFilter = gradMap.magFilter = THREE.NearestFilter;
+gradMap.generateMipmaps = false; gradMap.needsUpdate = true;
+function toon(color, extra){ return new THREE.MeshToonMaterial(Object.assign({ color, gradientMap:gradMap }, extra || {})); }
+
+const OUT = 0x3b2a3c;
+const olMats = {};
+function olMat(c){ return olMats[c] || (olMats[c] = new THREE.MeshBasicMaterial({ color:c, side:THREE.BackSide })); }
+function addOutline(mesh, t, c){
+  const g = mesh.geometry;
+  if(!g.boundingBox) g.computeBoundingBox();
+  const s = new THREE.Vector3(); g.boundingBox.getSize(s);
+  const ctr = new THREE.Vector3(); g.boundingBox.getCenter(ctr);
+  const o = new THREE.Mesh(g, olMat(c || OUT));
+  const sx = s.x > 1e-4 ? (s.x + 2*t)/s.x : 1, sy = s.y > 1e-4 ? (s.y + 2*t)/s.y : 1, sz = s.z > 1e-4 ? (s.z + 2*t)/s.z : 1;
+  o.scale.set(sx, sy, sz);
+  o.position.set(ctr.x*(1-sx), ctr.y*(1-sy), ctr.z*(1-sz));
+  mesh.add(o);
+  return o;
+}
+function box(w,h,d,mat,x,y,z,parent,t){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z); (parent || scene).add(m);
+  if(t) addOutline(m, t);
+  return m;
+}
+
+scene.add(new THREE.HemisphereLight(0xe9e0f5, 0x4a3d5a, .55));
+const key = new THREE.DirectionalLight(0xffe6cc, .7);
+key.position.set(8, 16, 12); scene.add(key);
+const rim = new THREE.DirectionalLight(0xb9c4ff, .3);
+rim.position.set(-10, 6, -12); scene.add(rim);
+
+/* 接地の影 */
+const shadowTex = (()=>{ const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  const r = g.createRadialGradient(64,64,0,64,64,64); r.addColorStop(0,'rgba(20,12,40,.55)'); r.addColorStop(1,'rgba(20,12,40,0)');
+  g.fillStyle = r; g.fillRect(0,0,128,128); return new THREE.CanvasTexture(c); })();
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(26, 22), new THREE.MeshBasicMaterial({ map:shadowTex, transparent:true, depthWrite:false }));
+shadow.rotation.x = -Math.PI/2; shadow.position.y = -.8; scene.add(shadow);
+
+/* ================= 曲データ（オリジナルのワルツ、16小節） ================= */
+/* 櫛歯18本：G4 から C7 までの全音階。0が最低音 */
+const SEMI = [0,2,4,5,7,9,10,12,14,16,17,19,21,22,24,26,28,29];
+const TEETH = SEMI.length;
+const freqOf = i => 392 * Math.pow(2, SEMI[i]/12);
+const CH = { C:[3,5,7], Am:[1,3,5], F:[6,8,3], G:[0,2,4], Em:[5,7,2], Dm:[4,6,8] };
+const BARS = [
+  ['C',  [[0,12],[1.5,11],[2,10]]],
+  ['Am', [[0,8],[1,10],[2,12]]],
+  ['F',  [[0,13],[1,12],[2,11],[2.5,10]]],
+  ['G',  [[0,11],[2,7]]],
+  ['C',  [[0,12],[1.5,11],[2,10]]],
+  ['Em', [[0,9],[1,10],[2,12]]],
+  [['F','G'], [[0,13],[1,15],[2,14],[2.5,13]]],
+  ['C',  [[0,12],[1,10]]],
+  ['Am', [[0,15],[1,14],[2,12]]],
+  ['Em', [[0,14],[1,12],[2,9]]],
+  ['F',  [[0,13],[1,12],[2,10],[2.5,12]]],
+  ['C',  [[0,14],[2,12]]],
+  ['Dm', [[0,11],[1,12],[2,13]]],
+  ['G',  [[0,14],[1,13],[2,11]]],
+  [['C','G'], [[0,12],[1,10],[2,11],[2.5,9]]],
+  ['C',  [[0,10],[1.5,7]]]
+];
+const BEATS = BARS.length * 3;
+const NOTES = [];
+(function build(){
+  const seen = new Set();
+  function add(b, t, v){ const k = b + ':' + t; if(seen.has(k)) return; seen.add(k); NOTES.push({ beat:b, tooth:t, vel:v }); }
+  BARS.forEach(([ch, mel], bi)=>{
+    const b0 = bi*3;
+    const A = Array.isArray(ch) ? CH[ch[0]] : CH[ch], B = Array.isArray(ch) ? CH[ch[1]] : CH[ch];
+    mel.forEach(([o,t])=>add(b0+o, t, 1));
+    add(b0, A[0], .8);
+    add(b0+1, A[1], .5);
+    if(Array.isArray(ch)) add(b0+2, B[0], .75); else add(b0+2, A[2], .5);
+  });
+  NOTES.sort((a,b)=>a.beat-b.beat);
+})();
+
+/* ================= 機構 ================= */
+const brass = toon(0xa98549), brassDk = toon(0x7f6038), steel = toon(0xaab1c2), steelDk = toon(0x676b81), leadMat = toon(0x4e4b5e);
+const mechRoot = new THREE.Group(); scene.add(mechRoot);   // 箱側のアンカーに合わせる親
+const mech = new THREE.Group(); mechRoot.add(mech);
+const BED_BOTTOM = -1.975;
+mech.position.y = -BED_BOTTOM;                              // 台座の底面を原点に
+
+/* 台座 */
+box(11, .35, 9, brassDk, 0, -1.8, .05, mech, .03);
+
+/* シリンダー */
+const R = 1.05, CYL_Z = -.8, CYL_LEN = 6.6;
+const cyl = new THREE.Group(); cyl.position.set(0, 0, CYL_Z); mech.add(cyl);
+const drum = new THREE.Mesh(new THREE.CylinderGeometry(R, R, CYL_LEN, 48), brass);
+drum.rotation.z = Math.PI/2; cyl.add(drum); addOutline(drum, .03);
+const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 9.4, 12), steelDk);
+axle.rotation.z = Math.PI/2; axle.position.x = .6; cyl.add(axle);
+/* ピン：曲データから配置 */
+const toothX = i => -3.2 + (i + .5) * (6.4/TEETH);
+const pinGeo = new THREE.CylinderGeometry(.05, .05, .26, 6);
+const pins = new THREE.InstancedMesh(pinGeo, toon(0xffffff), NOTES.length);
+const PIN_BASE = new THREE.Color(0xc3c9d6), PIN_HOT = new THREE.Color(0xffd894), _pc = new THREE.Color();
+{
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), P = new THREE.Vector3(), S = new THREE.Vector3(1,1,1);
+  NOTES.forEach((n,i)=>{
+    const psi = -n.beat / BEATS * Math.PI*2;
+    const rr = R + .1;
+    P.set(toothX(n.tooth), Math.sin(psi)*rr, Math.cos(psi)*rr);
+    Q.setFromEuler(E.set(Math.PI/2 - psi, 0, 0));
+    M.compose(P, Q, S); pins.setMatrixAt(i, M);
+    pins.setColorAt(i, PIN_BASE); n.psi = psi;
+  });
+}
+cyl.add(pins);
+
+/* 大歯車（シリンダーと一緒に回る） */
+function gearGeo(r, n, depth, hole, windows){
+  const s = new THREE.Shape(), root = r*.87, step = Math.PI*2/n;
+  for(let i=0;i<n;i++){
+    const a = i*step;
+    const pts = [[a, root],[a+step*.18, r],[a+step*.48, r],[a+step*.66, root]];
+    pts.forEach(([ang, rad], k)=>{ const x = Math.cos(ang)*rad, y = Math.sin(ang)*rad; (i===0 && k===0) ? s.moveTo(x,y) : s.lineTo(x,y); });
+  }
+  s.closePath();
+  const h = new THREE.Path(); h.absarc(0,0,hole,0,Math.PI*2,true); s.holes.push(h);
+  if(windows){
+    for(let k=0;k<4;k++){
+      const a = k*Math.PI/2 + Math.PI/4, d = r*.52;
+      const w = new THREE.Path(); w.absarc(Math.cos(a)*d, Math.sin(a)*d, r*.2, 0, Math.PI*2, true); s.holes.push(w);
+    }
+  }
+  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled:false, curveSegments:10 });
+  g.translate(0,0,-depth/2); g.rotateY(Math.PI/2);
+  return g;
+}
+const bigGear = new THREE.Mesh(gearGeo(1.3, 40, .14, .14, true), brass);
+bigGear.position.x = 3.95; cyl.add(bigGear); addOutline(bigGear, .02);
+
+/* 支柱 */
+box(.3, 2.2, 1.3, brassDk, -3.6, -.6, CYL_Z, mech, .025);
+const plate = new THREE.Shape();
+plate.moveTo(-2.2,-1.62); plate.lineTo(1.9,-1.62); plate.lineTo(1.9,.6); plate.quadraticCurveTo(1.9,2.8,.4,2.8); plate.lineTo(-1.4,1.3); plate.quadraticCurveTo(-2.2,.9,-2.2,.2); plate.closePath();
+const plateGeo = new THREE.ExtrudeGeometry(plate, { depth:.22, bevelEnabled:false });
+plateGeo.translate(0,0,-.11); plateGeo.rotateY(-Math.PI/2);
+const sidePlate = new THREE.Mesh(plateGeo, brassDk);
+sidePlate.position.set(3.6, 0, 0); mech.add(sidePlate); addOutline(sidePlate, .025);
+
+/* 輪列と調速機（空気ブレーキの羽根） */
+const S2 = new THREE.Vector3(3.95, 1.0, .63);
+const shaft2 = new THREE.Group(); shaft2.position.copy(S2); mech.add(shaft2);
+const pin2 = new THREE.Mesh(gearGeo(.45, 12, .2, .06), brass); shaft2.add(pin2); addOutline(pin2, .015);
+const g2 = new THREE.Mesh(gearGeo(.9, 30, .12, .06, true), brass); g2.position.x = .45; shaft2.add(g2); addOutline(g2, .015);
+const a2 = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.1,8), steelDk); a2.rotation.z = Math.PI/2; a2.position.x = -.1; shaft2.add(a2);
+const S3 = new THREE.Vector3(4.4, 1.0 + 1.2*Math.sin(Math.PI/3), .63 + 1.2*Math.cos(Math.PI/3));
+const shaft3 = new THREE.Group(); shaft3.position.copy(S3); mech.add(shaft3);
+const pin3 = new THREE.Mesh(gearGeo(.3, 9, .16, .04), brass); shaft3.add(pin3); addOutline(pin3, .012);
+const a3 = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,1.6,8), steelDk); a3.rotation.z = Math.PI/2; a3.position.x = .1; shaft3.add(a3);
+const fan = new THREE.Group(); fan.position.x = .6; shaft3.add(fan);
+{
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .16, 12), brassDk);
+  hub.rotation.z = Math.PI/2; fan.add(hub); addOutline(hub, .012);
+}
+[0, Math.PI].forEach(a=>{
+  const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .62, .4), brass);
+  b.position.set(0, Math.cos(a)*.4, Math.sin(a)*.4); b.rotation.x = -a; fan.add(b); addOutline(b, .015);
+});
+
+/* 櫛歯 */
+const TIP_Z = CYL_Z + R + .2 - .03, TIP_Y = .05;
+const teeth = [];
+const TL = 2.4;                                   // 歯の長さは揃え、低音は裏の鉛で調律する
+for(let i=0;i<TEETH;i++){
+  const slot = 6.4/TEETH, x = toothX(i);
+  const pivot = new THREE.Group(); pivot.position.set(x, TIP_Y, TIP_Z + TL); mech.add(pivot);
+  const t = new THREE.Mesh(new THREE.BoxGeometry(slot*.78, .08, TL), steel);
+  t.position.z = -TL/2; pivot.add(t); addOutline(t, .012);
+  if(i < 6){
+    const w = new THREE.Mesh(new THREE.BoxGeometry(slot*.66, .14, .55 - i*.05), leadMat);
+    w.position.set(0, -.11, -TL + .45); pivot.add(w); addOutline(w, .01);
+  }
+  teeth.push({ pivot, age:99, amp:0, freq:freqOf(i) });
+}
+/* 櫛の根元の一枚板と、それを載せる台 */
+const COMB_ROOT = TIP_Z + TL;
+box(6.7, .2, 1.0, steelDk, 0, TIP_Y - .02, COMB_ROOT + .5, mech, .02);
+{
+  const top = TIP_Y - .12, bot = -1.625;
+  box(6.1, top - bot, .8, brassDk, 0, (top + bot)/2, COMB_ROOT + .5, mech, .02);
+}
+[-2.6, 0, 2.6].forEach(x=>{
+  const sc = new THREE.Mesh(new THREE.CylinderGeometry(.13, .13, .06, 14), brass);
+  sc.position.set(x, TIP_Y + .11, COMB_ROOT + .55); mech.add(sc); addOutline(sc, .012);
+});
+
+/* ゼンマイの香箱 */
+const barrel = new THREE.Group(); barrel.position.set(-2.4, -1.625, -3.2); mech.add(barrel);
+const drumB = new THREE.Mesh(new THREE.CylinderGeometry(.95, .95, 1.25, 32), brassDk);
+drumB.position.y = .625; barrel.add(drumB); addOutline(drumB, .025);
+const ratchet = new THREE.Mesh(gearGeo(.6, 16, .1, .1), brass);
+ratchet.rotation.z = Math.PI/2; ratchet.position.y = 1.3; barrel.add(ratchet); addOutline(ratchet, .015);
+const click = box(.5, .08, .12, steelDk, -2.4 + .75, -1.625 + 1.34, -3.2 + .45, mech, .012);
+click.rotation.y = .5;
+
+/* ================= 仮の箱 ================= */
+const wood = toon(0x6f4a3c), woodDk = toon(0x533427), inlay = toon(0xd6bd96), lining = toon(0xbca6c8);
+const boxRoot = new THREE.Group(); scene.add(boxRoot);
+const placeholder = new THREE.Group(); boxRoot.add(placeholder);
+const IW = 6.1, ID = 5.0, WT = .5, WH = 5.4;
+box(IW*2 + WT*2, .5, ID*2 + WT*2, wood, 0, -.25, 0, placeholder, .03);
+box(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, ID + WT/2, placeholder, .03);
+box(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, -ID - WT/2, placeholder, .03);
+box(WT, WH, ID*2, wood, IW + WT/2, WH/2 - .5 + .25, 0, placeholder, .03);
+box(WT, WH, ID*2, wood, -IW - WT/2, WH/2 - .5 + .25, 0, placeholder, .03);
+box(2.2, .9, .06, inlay, 0, 2.4, ID + WT + .03, placeholder, .012);
+const keyhole = new THREE.Mesh(new THREE.CircleGeometry(.13, 16), new THREE.MeshBasicMaterial({ color:0x4a3346 }));
+keyhole.position.set(0, 2.45, ID + WT + .065); placeholder.add(keyhole);
+[[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+  const f = new THREE.Mesh(new THREE.SphereGeometry(.38, 14, 10), woodDk);
+  f.scale.y = .6; f.position.set(sx*(IW + WT - .5), -.55, sz*(ID + WT - .5)); placeholder.add(f);
+});
+const lidPivot = new THREE.Group(); lidPivot.position.set(0, WH - .25, -ID - WT); placeholder.add(lidPivot);
+const LD = ID*2 + WT*2 + .2;
+const lidTop = box(IW*2 + WT*2 + .2, .6, LD, wood, 0, .3, LD/2 - .1, lidPivot, .03);
+box((IW*2)*.7, .03, LD*.62, inlay, 0, .615, LD/2 - .1, lidPivot, .01);
+const lin = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - .2, ID*2 - .2), lining);
+lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin);
+
+/* 箱の差し替え状態 */
+let custom = null, customLid = null, lidTarget = 1, lidT = 1, boxHidden = false;
+const LID_OPEN = 1.75;
+function currentLid(){ return custom ? customLid : lidPivot; }
+function setBoxVisible(v){
+  boxRoot.visible = v;
+}
+
+/* ================= 音 ================= */
+let ac = null, master = null, verb = null;
+function initAudio(){
+  if(ac) return;
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = .5;
+  verb = ac.createConvolver();
+  const len = ac.sampleRate * 2.4, ir = ac.createBuffer(2, len, ac.sampleRate);
+  for(let ch=0; ch<2; ch++){ const d = ir.getChannelData(ch); for(let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 3); }
+  verb.buffer = ir;
+  const wet = ac.createGain(); wet.gain.value = .28;
+  master.connect(ac.destination); master.connect(verb); verb.connect(wet); wet.connect(ac.destination);
+}
+function pluck(f, v){
+  if(!ac) return;
+  const t = ac.currentTime;
+  const dec = 2.4 - Math.log2(f/392)*.55;
+  [[1, 1, dec],[2.0, .22, dec*.5],[5.93, .09, .35]].forEach(([mul, g, d])=>{
+    const o = ac.createOscillator(), gn = ac.createGain();
+    o.type = 'sine'; o.frequency.value = f*mul;
+    gn.gain.setValueAtTime(0, t);
+    gn.gain.linearRampToValueAtTime(g*v*.32, t + .004);
+    gn.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(gn); gn.connect(master); o.start(t); o.stop(t + d + .05);
+  });
+}
+
+/* ================= 再生の状態 ================= */
+const BPS = 104/60;
+let playing = false, speed = 1, winding = false, windT = 0, beatPos = 0, rewindT = 0;
+const playBtn = document.getElementById('playBtn'), windBtn = document.getElementById('windBtn'), rewindBtn = document.getElementById('rewindBtn');
+function refreshButtons(){
+  playBtn.textContent = playing ? '止める' : '再生';
+  playBtn.setAttribute('aria-pressed', String(playing));
+  windBtn.disabled = !playing || winding;
+}
+playBtn.addEventListener('click', ()=>{
+  initAudio(); if(ac.state === 'suspended') ac.resume();
+  if(!playing && speed < .05){ speed = 1; }
+  playing = !playing; if(!playing) winding = false;
+  refreshButtons();
+});
+windBtn.addEventListener('click', ()=>{ if(playing){ winding = true; windT = 0; refreshButtons(); } });
+rewindBtn.addEventListener('click', ()=>{ winding = false; speed = 1; rewindT = 1.2; refreshButtons(); });
+
+function triggerBetween(a, b){
+  const v = .35 + .65*Math.sqrt(speed);
+  for(const n of NOTES){
+    let hit;
+    if(b >= a) hit = n.beat > a && n.beat <= b;
+    else hit = n.beat > a || n.beat <= b;
+    if(hit){
+      const tt = teeth[n.tooth];
+      tt.age = 0; tt.amp = .09*v;
+      pluck(tt.freq, n.vel*v);
+    }
+  }
+}
+
+/* ================= UI：蓋・箱・読み込み ================= */
+const lidBtn = document.getElementById('lidBtn'), xrayBtn = document.getElementById('xrayBtn');
+const statusEl = document.getElementById('status');
+const fileIn = document.getElementById('fileIn'), resetBtn = document.getElementById('resetBtn');
+const heightRow = document.getElementById('heightRow'), heightSlider = document.getElementById('heightSlider');
+lidBtn.addEventListener('click', ()=>{
+  lidTarget = lidTarget ? 0 : 1;
+  lidBtn.textContent = lidTarget ? '蓋をしめる' : '蓋をあける';
+  lidBtn.setAttribute('aria-pressed', String(!!lidTarget));
+});
+xrayBtn.addEventListener('click', ()=>{
+  boxHidden = !boxHidden; setBoxVisible(!boxHidden);
+  xrayBtn.textContent = boxHidden ? '箱を見せる' : '箱を隠す';
+  xrayBtn.setAttribute('aria-pressed', String(boxHidden));
+});
+const specBtn = document.getElementById('specBtn'), spec = document.getElementById('spec');
+specBtn.addEventListener('click', ()=>{
+  const open = spec.style.display !== 'block';
+  spec.style.display = open ? 'block' : 'none';
+  specBtn.setAttribute('aria-pressed', String(open));
+});
+
+let autoBaseY = 0;
+heightSlider.addEventListener('input', ()=>{ mechRoot.position.y = autoBaseY + parseFloat(heightSlider.value); });
+
+function toToon(obj){
+  obj.traverse(o=>{
+    if(!o.isMesh) return;
+    const conv = m => {
+      const t = toon(m.color ? m.color.clone().convertLinearToSRGB() : 0xffffff, {
+        map:m.map || null, transparent:!!m.transparent, opacity:m.opacity != null ? m.opacity : 1,
+        side:m.side, alphaTest:m.alphaTest || 0
+      });
+      if(t.map) t.map.encoding = THREE.LinearEncoding;
+      return t;
+    };
+    o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+  });
+}
+
+function loadBox(buffer, name){
+  const loader = new THREE.GLTFLoader();
+  loader.parse(buffer, '', gltf=>{
+    const model = gltf.scene;
+    toToon(model);
+    const bb = new THREE.Box3().setFromObject(model);
+    const size = new THREE.Vector3(); bb.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    let scale = 1, unit = 'センチ';
+    if(maxDim < 1){ scale = 100; unit = 'メートル'; }
+    else if(maxDim > 80){ scale = .1; unit = 'ミリ'; }
+    const holder = new THREE.Group();
+    holder.add(model);
+    holder.scale.setScalar(scale);
+    if(custom) boxRoot.remove(custom);
+    custom = holder;
+    placeholder.visible = false;
+    boxRoot.add(holder);
+
+    let anchor = null; customLid = null;
+    model.traverse(o=>{
+      if(!anchor && /mechanchor/i.test(o.name)) anchor = o;
+      if(!customLid && /lid/i.test(o.name)) customLid = o;
+    });
+    if(customLid) customLid.userData.baseRotX = customLid.rotation.x;
+    holder.updateMatrixWorld(true);
+
+    const bb2 = new THREE.Box3().setFromObject(holder);
+    if(anchor){
+      const p = new THREE.Vector3(); anchor.getWorldPosition(p);
+      mechRoot.position.copy(p);
+      heightRow.style.display = 'none';
+    } else {
+      const c = new THREE.Vector3(); bb2.getCenter(c);
+      autoBaseY = bb2.min.y + .5;
+      mechRoot.position.set(c.x, autoBaseY, c.z);
+      heightSlider.value = 0;
+      heightRow.style.display = 'flex';
+    }
+    shadow.position.y = bb2.min.y - .02;
+    const s2 = new THREE.Vector3(); bb2.getSize(s2);
+    statusEl.textContent = `${name}｜単位を${unit}と判断｜外形 ${s2.x.toFixed(1)} × ${s2.z.toFixed(1)} × 高さ${s2.y.toFixed(1)} cm｜`
+      + (anchor ? 'MechAnchorあり' : 'MechAnchorなし（高さを調整）') + '｜' + (customLid ? `蓋：${customLid.name}` : '蓋なし');
+    resetBtn.disabled = false;
+    if(boxHidden) setBoxVisible(false);
+  }, err=>{
+    statusEl.textContent = '読み込めませんでした。テクスチャを埋め込んだ .glb で書き出してください。';
+    console.error(err);
+  });
+}
+fileIn.addEventListener('change', ()=>{
+  const f = fileIn.files && fileIn.files[0];
+  if(!f) return;
+  statusEl.textContent = `${f.name} を読み込み中…`;
+  const r = new FileReader();
+  r.onload = ()=>loadBox(r.result, f.name);
+  r.readAsArrayBuffer(f);
+  fileIn.value = '';
+});
+resetBtn.addEventListener('click', ()=>{
+  if(custom){ boxRoot.remove(custom); custom = null; customLid = null; }
+  placeholder.visible = true;
+  mechRoot.position.set(0,0,0);
+  shadow.position.y = -.8;
+  heightRow.style.display = 'none';
+  resetBtn.disabled = true;
+  statusEl.textContent = '仮の箱を表示中';
+});
+
+/* ================= カメラ ================= */
+const target = new THREE.Vector3(0, 2.4, 0);
+let az = .55, el = .62, dist = 30, tAz = az, tEl = el, tDist = dist;
+const ptrs = new Map(); let pinch = 0;
+canvas.addEventListener('pointerdown', e=>{ canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x:e.clientX, y:e.clientY }); });
+canvas.addEventListener('pointermove', e=>{
+  const p = ptrs.get(e.pointerId); if(!p) return;
+  if(ptrs.size === 1){
+    tAz -= (e.clientX - p.x)*.006;
+    tEl = Math.max(.08, Math.min(1.35, tEl + (e.clientY - p.y)*.005));
+  }
+  p.x = e.clientX; p.y = e.clientY;
+  if(ptrs.size === 2){
+    const [a,b] = [...ptrs.values()], d = Math.hypot(a.x-b.x, a.y-b.y);
+    if(pinch) tDist = Math.max(10, Math.min(55, tDist * pinch / d));
+    pinch = d;
+  }
+});
+function up(e){ ptrs.delete(e.pointerId); if(ptrs.size < 2) pinch = 0; }
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+canvas.addEventListener('wheel', e=>{ e.preventDefault(); tDist = Math.max(10, Math.min(55, tDist*(1 + e.deltaY*.001))); }, { passive:false });
+
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h;
+  camera.fov = w/h < 1 ? 50 : 38;
+  camera.updateProjectionMatrix();
+  if(!resize.done){ tDist = dist = w/h < 1 ? 42 : 30; resize.done = true; }
+}
+window.addEventListener('resize', resize); resize();
+
+/* ================= ループ ================= */
+const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last = performance.now();
+renderer.setAnimationLoop(now=>{
+  const dt = Math.min((now - last)/1000, .05); last = now;
+
+  /* ゼンマイ切れ：テンポが落ち、はじく力が弱まり、やがて止まる（音程は櫛歯で決まるので変わらない） */
+  if(playing && winding){
+    windT += dt;
+    speed = Math.max(0, 1 - Math.pow(windT/11, 1.7));
+    if(speed <= .015){ speed = 0; playing = false; winding = false; refreshButtons(); }
+  }
+  const dBeat = playing ? BPS*speed*dt : 0;
+  if(dBeat > 0){
+    const prev = beatPos;
+    beatPos = (beatPos + dBeat) % BEATS;
+    triggerBetween(prev, beatPos);
+  }
+  const ang = beatPos / BEATS * Math.PI*2;
+  cyl.rotation.x = -ang;
+  const w2 = ang * (1.3/.45);
+  shaft2.rotation.x = w2;
+  shaft3.rotation.x = -w2*(.9/.3);
+  fan.rotation.x = -w2*(.9/.3)*5;
+  if(rewindT > 0){ rewindT -= dt; barrel.rotation.y += dt*4; }
+  barrel.rotation.y -= dBeat*.02;
+
+  for(let i=0;i<NOTES.length;i++){
+    let w = NOTES[i].psi + ang;
+    w = Math.atan2(Math.sin(w), Math.cos(w));
+    const hot = w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0;
+    pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_HOT, hot));
+  }
+  pins.instanceColor.needsUpdate = true;
+  teeth.forEach(t=>{
+    t.age += dt;
+    const k = t.amp * Math.exp(-t.age*9) * Math.sin(t.age*70);
+    t.pivot.rotation.x = t.age < 3 ? k : 0;
+  });
+
+  lidT += (lidTarget - lidT)*Math.min(1, dt*4);
+  const L = currentLid();
+  if(L){
+    if(L === lidPivot) L.rotation.x = -LID_OPEN*lidT;
+    else L.rotation.x = (L.userData.baseRotX || 0) - LID_OPEN*lidT;
+  }
+
+  az += (tAz - az)*Math.min(1, dt*6); el += (tEl - el)*Math.min(1, dt*6); dist += (tDist - dist)*Math.min(1, dt*6);
+  if(!reduce && ptrs.size === 0) tAz += dt*.03;
+  camera.position.set(target.x + Math.sin(az)*Math.cos(el)*dist, target.y + Math.sin(el)*dist, target.z + Math.cos(az)*Math.cos(el)*dist);
+  camera.lookAt(target);
+  renderer.render(scene, camera);
+});
+
+refreshButtons();
+})();
+</script>
+</body>
+</html>
