@@ -130,7 +130,7 @@
 <p id="hint">ドラッグで回る　二本指で寄る・動かす</p>
 
 <div id="dbg">
-  <div class="row"><span id="tLabel">-</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -667,7 +667,7 @@ const seaMat = new THREE.ShaderMaterial({
       col=mix(col,uDeep*.92,(1.-fr)*near*.18);
       if(near>0.){
         float crest=smoothstep(.62,.7,fbm3(vec2(p.x*.9,p.y*.45)+cg*2.+vec2(uT*.7,uT*.3)));
-        col=mix(col,uLight*1.08,crest*near*.35);
+        col=mix(col,uLight*1.08,crest*near*.35*(1.-uCalm));   // 近景の波頭。静かな海では描かない（白い斑に見えた）
       }
       // 照り返し：太陽が低いほど強く、温かく。月は弱く
       float sheen=pow(s,mix(10.,5.,uSunLow)*(1.-uCalm*.5))*mix(.22,.7,uSunLow)*uSunUp*(1.-uCalm*.35);
@@ -736,6 +736,7 @@ for(let i=0;i<14;i++){
   c.userData.v = (0.8 + rnd()*1.2)*MOTION;
   scene.add(c); clouds.push(c);
 }
+if(PARAMS.has('nocloud')) clouds.forEach(c=>c.visible = false);   // 切り分け用
 
 /* ---------- 地形 ---------- */
 function bump(x,z,cx,cz,h,sx,sz){ return h*Math.exp(-(((x-cx)*(x-cx))/sx + ((z-cz)*(z-cz))/sz)); }
