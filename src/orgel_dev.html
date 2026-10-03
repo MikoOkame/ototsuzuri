@@ -63,7 +63,7 @@
 <header id="tag">
   <h1>音綴り<span>- OtoTsuzuri -</span></h1>
 </header>
-<p id="hint">ドラッグで見まわす</p>
+<p id="hint">ドラッグで回る　二本指で寄る・動かす</p>
 
 <div id="dbg">
   <div class="row"><span id="tLabel">-</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
@@ -998,7 +998,7 @@ rod.rotation.z = Math.PI/2; rod.position.set(0, 3.75, .2); scene.add(rod);
    単位は試作のまま（≒cm）で組み、ORGEL_SCALE で m に落とす。
    曲データは第3段階で v10 の TRACKS から生成する。今は試作の曲で形だけ回す。
 ================================================================ */
-const ORGEL_SCALE = .012;
+const ORGEL_SCALE = PARAMS.has('oscale') ? parseFloat(PARAMS.get('oscale')) : .02;
 const orgelRoot = new THREE.Group();
 orgelRoot.position.set(0, SILL_TOP + .5*ORGEL_SCALE, .06);
 orgelRoot.scale.setScalar(ORGEL_SCALE);
@@ -1340,44 +1340,72 @@ function refreshDebug(){
   if(document.activeElement !== tSlider) tSlider.value = Math.round(dayT*1000);
 }
 
-/* ---------- カメラ操作 ---------- */
-const EYE_Y = 2.3;
-const ZOOM_MIN = .075;  // ここまで寄ると機構が画面の半分ほどになる
-let baseDist = 4, zoom = 1, yaw = 0, pitch = 0, tYaw = 0, tPitch = 0;
-if(PARAMS.has('zoom')) zoom = parseFloat(PARAMS.get('zoom'));
-if(PARAMS.has('yaw')) tYaw = yaw = parseFloat(PARAMS.get('yaw'));
-if(PARAMS.has('pitch')) tPitch = pitch = parseFloat(PARAMS.get('pitch'));
+/* ---------- カメラ操作：オルゴールを中心に回る ----------
+   1本指ドラッグ：回る（方位・仰角）。ピンチ／トラックパッドのピンチ：寄る・引く。
+   2本指ドラッグ／トラックパッドの2本指スクロール：平行移動。
+   URL 引数 ?az= ?el= ?dist=（度・度・m）で固定できる。 */
+const ORBIT = {
+  az:0, el:.21, dist:3.2,                    // 目標値
+  cAz:0, cEl:.21, cDist:3.2,                 // 追従する現在値
+  // 平行移動。既定では窓が収まるよう少し上を見る。寄るほど（距離に比例して）オルゴールの中心へ戻る
+  pan:new THREE.Vector3(0, .55, 0), cPan:new THREE.Vector3(0, .55, 0),
+  AZ_MAX:THREE.MathUtils.degToRad(60), EL_MIN:THREE.MathUtils.degToRad(2), EL_MAX:THREE.MathUtils.degToRad(60),
+  DIST_MIN:.25, DIST_MAX:3.6, PAN_MAX:.9,
+};
+const ORBIT_CENTER = new THREE.Vector3(0, SILL_TOP + .05, .06);   // オルゴールの中心あたり
+if(PARAMS.has('az')) ORBIT.az = ORBIT.cAz = THREE.MathUtils.degToRad(parseFloat(PARAMS.get('az')));
+if(PARAMS.has('el')) ORBIT.el = ORBIT.cEl = THREE.MathUtils.degToRad(parseFloat(PARAMS.get('el')));
+if(PARAMS.has('dist')) ORBIT.dist = ORBIT.cDist = parseFloat(PARAMS.get('dist'));
 const hint = document.getElementById('hint');
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
+const clampO = ()=>{
+  ORBIT.az = THREE.MathUtils.clamp(ORBIT.az, -ORBIT.AZ_MAX, ORBIT.AZ_MAX);
+  ORBIT.el = THREE.MathUtils.clamp(ORBIT.el, ORBIT.EL_MIN, ORBIT.EL_MAX);
+  ORBIT.dist = THREE.MathUtils.clamp(ORBIT.dist, ORBIT.DIST_MIN, ORBIT.DIST_MAX);
+  ORBIT.pan.x = THREE.MathUtils.clamp(ORBIT.pan.x, -ORBIT.PAN_MAX, ORBIT.PAN_MAX);
+  ORBIT.pan.y = THREE.MathUtils.clamp(ORBIT.pan.y, -.3, ORBIT.PAN_MAX);
+  ORBIT.pan.z = THREE.MathUtils.clamp(ORBIT.pan.z, -.2, .6);
+};
+const _pr = new THREE.Vector3(), _pu = new THREE.Vector3();
+function panBy(dx, dy){   // 画面の右・上の向きへ、距離に応じた量だけ動かす
+  const k = ORBIT.cDist*.0016/Math.min(1, ORBIT.cDist/3.2);
+  camera.matrixWorld.extractBasis(_pr, _pu, new THREE.Vector3());
+  ORBIT.pan.addScaledVector(_pr, -dx*k).addScaledVector(_pu, dy*k);
+}
 const pointers = new Map();
-let lastPinch = 0;
+let lastPinch = 0, lastMid = null;
 canvas.addEventListener('pointerdown', e=>{
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  lastPinch = 0; lastMid = null;
   hideHint();
 });
 canvas.addEventListener('pointermove', e=>{
   const p = pointers.get(e.pointerId);
   if(!p) return;
   if(pointers.size === 1){
-    tYaw = Math.max(-.4, Math.min(.4, tYaw - (e.clientX - p.x)*.0035));
-    tPitch = Math.max(-.28, Math.min(.2, tPitch - (e.clientY - p.y)*.0028));
+    ORBIT.az -= (e.clientX - p.x)*.005;
+    ORBIT.el += (e.clientY - p.y)*.004;
   }
   p.x = e.clientX; p.y = e.clientY;
   if(pointers.size === 2){
     const [a,b] = [...pointers.values()];
-    const d = Math.hypot(a.x-b.x, a.y-b.y);
-    if(lastPinch) zoom = Math.max(ZOOM_MIN, Math.min(1.12, zoom * (lastPinch / d)));
-    lastPinch = d;
+    const d = Math.hypot(a.x-b.x, a.y-b.y), mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+    if(lastPinch) ORBIT.dist *= lastPinch/d;
+    if(lastMid) panBy(mx - lastMid.x, my - lastMid.y);
+    lastPinch = d; lastMid = { x:mx, y:my };
   }
+  clampO();
 });
-function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size < 2) lastPinch = 0; }
+function endPointer(e){ pointers.delete(e.pointerId); lastPinch = 0; lastMid = null; }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
-  zoom = Math.max(ZOOM_MIN, Math.min(1.12, zoom * (1 + e.deltaY*.0008)));
+  if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;          // トラックパッドのピンチ
+  else panBy(-e.deltaX, -e.deltaY);                       // 2本指スクロール
+  clampO();
   hideHint();
 }, { passive:false });
 
@@ -1388,11 +1416,6 @@ function resize(){
   camera.aspect = aspect;
   camera.fov = aspect < 1 ? 70 : 52;
   camera.updateProjectionMatrix();
-  const vh = camera.fov * Math.PI/180;
-  const hh = 2*Math.atan(Math.tan(vh/2)*aspect);
-  const needW = 1.2 / Math.tan(hh/2);
-  const needH = 1.75 / Math.tan(vh/2);
-  baseDist = Math.max(2.6, Math.min(3.4, Math.max(needW, needH)));
 }
 window.addEventListener('resize', resize);
 resize();
@@ -1411,17 +1434,15 @@ renderer.setAnimationLoop(now=>{
   applyTime(dayT);
   refreshDebug();
 
-  yaw += (tYaw - yaw)*Math.min(1, dt*5);
-  pitch += (tPitch - pitch)*Math.min(1, dt*5);
-  const dist = baseDist * zoom;
-  // 見回し：体を横へ寄せて窓の中心を見る。回転は少しだけ足す（回し過ぎると壁しか見えない）
-  // 寄るほど目線を下げ、見る先を窓の中心からオルゴールへ移す
-  const close = sstep(.72, ZOOM_MIN, zoom);
-  camera.position.set(yaw*1.2*(1 - close*.7), EYE_Y - close*1.0, dist);
-  LOOK.set(0, 2.05 - close*(2.05 - (SILL_TOP + .04)), close*.04);
+  const k = Math.min(1, dt*6);
+  ORBIT.cAz += (ORBIT.az - ORBIT.cAz)*k; ORBIT.cEl += (ORBIT.el - ORBIT.cEl)*k;
+  ORBIT.cDist += (ORBIT.dist - ORBIT.cDist)*k; ORBIT.cPan.lerp(ORBIT.pan, k);
+  LOOK.copy(ORBIT_CENTER).addScaledVector(ORBIT.cPan, Math.min(1, ORBIT.cDist/3.2));
+  camera.position.set(
+    LOOK.x + Math.sin(ORBIT.cAz)*Math.cos(ORBIT.cEl)*ORBIT.cDist,
+    LOOK.y + Math.sin(ORBIT.cEl)*ORBIT.cDist,
+    LOOK.z + Math.cos(ORBIT.cAz)*Math.cos(ORBIT.cEl)*ORBIT.cDist);
   camera.lookAt(LOOK);
-  camera.rotateY(yaw*.25);
-  camera.rotateX(pitch);
 
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
