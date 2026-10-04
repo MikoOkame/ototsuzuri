@@ -1900,7 +1900,9 @@ function birdNeck(b, dt){
   if(!b.neck) return;
   // 見たい地点：触れた指 → オルゴール。夜は正面のまま
   let wantY = 0, wantP = 0;
-  const target = b.lookT > 0 ? b.lookAt : ((!isDay() || b.mode === 'fly') ? null : ORBIT_CENTER);
+  // ホバリング中・飛行中は首を振らない（hover の姿勢で下を向かせると、くちばしがお腹に食い込む）。タップした指も見ない
+  const still = b.mode === 'hover' || b.mode === 'fly';
+  const target = still ? null : (b.lookT > 0 ? b.lookAt : (!isDay() ? null : ORBIT_CENTER));
   if(target){
     _lt.copy(target); b.model.worldToLocal(_lt); _lt.y -= .2;
     wantY = THREE.MathUtils.clamp(Math.atan2(_lt.x, _lt.z), -1.2, 1.2);
@@ -1912,7 +1914,7 @@ function birdNeck(b, dt){
   // 首をかしげる：たまに傾けて戻す
   b.tiltT -= dt;
   if(b.tiltT <= 0){ b.tiltT = 2 + Math.random()*5; b.tiltGoal = (Math.random() < .5 ? 0 : (Math.random()-.5)*.7); }
-  b.tilt += ((b.tiltGoal || 0) - b.tilt)*Math.min(1, 4*dt);
+  b.tilt += ((still ? 0 : (b.tiltGoal || 0)) - b.tilt)*Math.min(1, 4*dt);   // 首をかしげるのも止める
   const ns = b.head ? NECK_SHARE : 1;
   boneTurn(b.model, b.neck, M_Y, b.yaw*ns);
   boneTurn(b.model, b.neck, M_X, -b.pitch*ns);
@@ -2437,7 +2439,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
-    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]) };
+    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]) };
 }
 refreshSpeedButtons();
 function refreshDebug(){
