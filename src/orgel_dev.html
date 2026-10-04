@@ -1740,17 +1740,34 @@ for(let k=0;k<=24;k++){
 });
 const planter = toon(0x9a7a66);
 const petals = [0xf4b6c4, 0xffffff, 0xf9d3a0, 0xd9c2f0];
+/* 花箱：手すりの外側に、コの字の金具で上端に掛けて吊るす。
+   箱の上端は手すりの上端より少し下（手すりの上は鳥が止まれるように空けておく）。花は手すりの上端を少し越えて見える程度 */
+const RAIL_TOP_FACE = RAIL_TOP + .035, RAIL_HALF_D = .045;          // 手すりの上面の高さと、奥行きの半分
+const BOX_H = .17, BOX_D = .18, BOX_W = .7, HOOK_T = .014, HOOK_W = .05;
+const BOX_TOP = RAIL_TOP_FACE - .05;                                 // 手すりの上端より 5cm 下
+const BOX_Y = BOX_TOP - BOX_H/2;
+const BOX_Z = RAIL_Z - RAIL_HALF_D - HOOK_T - BOX_D/2;               // 手すりの外側、金具の板の厚みぶん離す
 [-1.3, 1.3].forEach(px=>{   // 両端寄り（手すりの鳥の尾羽が刺さらない）
-  box(.7, .17, .18, planter, px, RAIL_TOP + .1, RAIL_Z - .14, scene, .012, OUT_EX);
+  box(BOX_W, BOX_H, BOX_D, planter, px, BOX_Y, BOX_Z, scene, .012, OUT_EX);
+  // 金具：手すりの上に掛ける上板 → 部屋側に少し垂れる爪 → 外側を下りる板 → 箱の底を受ける板 → 箱の外側を押さえる爪
+  [-BOX_W*.34, BOX_W*.34].forEach(dx=>{
+    const x = px + dx, zIn = RAIL_Z + RAIL_HALF_D + HOOK_T/2, zOut = RAIL_Z - RAIL_HALF_D - HOOK_T/2;
+    const yTop = RAIL_TOP_FACE + HOOK_T/2, yBot = BOX_Y - BOX_H/2 - HOOK_T/2, zFront = BOX_Z - BOX_D/2 - HOOK_T/2;
+    box(HOOK_W, HOOK_T, zIn - zOut + HOOK_T, iron, x, yTop, RAIL_Z, scene, .006, OUT_EX);
+    box(HOOK_W, .05, HOOK_T, iron, x, yTop - .025, zIn, scene, .006, OUT_EX);
+    box(HOOK_W, yTop - yBot, HOOK_T, iron, x, (yTop + yBot)/2, zOut, scene, .006, OUT_EX);
+    box(HOOK_W, HOOK_T, zOut - zFront + HOOK_T, iron, x, yBot, (zOut + zFront)/2, scene, .006, OUT_EX);
+    box(HOOK_W, .07, HOOK_T, iron, x, yBot + .035, zFront, scene, .006, OUT_EX);
+  });
   for(let k=0;k<11;k++){
     const fl = new THREE.Mesh(new THREE.SphereGeometry(.035 + rnd()*.02, 8, 6), toon(pick(petals)));
-    fl.position.set(px - .3 + rnd()*.6, RAIL_TOP + .2 + rnd()*.07, RAIL_Z - .14 + (rnd()-.5)*.1);
+    fl.position.set(px - .3 + rnd()*.6, BOX_TOP + .025 + rnd()*.05, BOX_Z + (rnd()-.5)*.1);   // 手すりの上端（+.05）を少し越える
     scene.add(fl);
   }
   for(let k=0;k<8;k++){
     const lf = new THREE.Mesh(new THREE.SphereGeometry(.04, 6, 5), toon(0x7fa58c));
     lf.scale.set(1.3,.6,1);
-    lf.position.set(px - .32 + rnd()*.64, RAIL_TOP + .18, RAIL_Z - .14 + (rnd()-.5)*.12);
+    lf.position.set(px - .32 + rnd()*.64, BOX_TOP + .01, BOX_Z + (rnd()-.5)*.12);
     scene.add(lf);
   }
 });
@@ -2517,6 +2534,8 @@ if(PARAMS.has('dist')) ORBIT.dist = ORBIT.cDist = parseFloat(PARAMS.get('dist'))
 if(PARAMS.has('pany')) ORBIT.pan.y = ORBIT.cPan.y = parseFloat(PARAMS.get('pany'));
 if(PARAMS.has('panx')) ORBIT.pan.x = ORBIT.cPan.x = parseFloat(PARAMS.get('panx'));
 if(PARAMS.has('panz')) ORBIT.pan.z = ORBIT.cPan.z = parseFloat(PARAMS.get('panz'));
+// ?look=x,y,z：その点をカメラの中心にする（確認用。距離に関係なく狙える）
+if(PARAMS.has('look')){ const [x,y,z] = PARAMS.get('look').split(',').map(Number); ORBIT.pan.set(x,y,z).sub(ORBIT_CENTER).divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }
 const hint = document.getElementById('hint');
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
