@@ -64,7 +64,11 @@
     border:1px solid transparent; border-image-source:var(--frame-img);
     border-image-width:var(--frame-corner); border-image-repeat:round;   /* border-image-slice は JS が隅×3 で入れる */
   }
-  button.hasIcon{ font-size:0; background-size:contain; background-position:center; background-repeat:no-repeat; }
+  /* 手描きのボタン：ボタン全体を画像で描く（円・縁取り・地の色も画像の中）。CSS の縁取りと地の色は消す */
+  /* ボタンごとの指定（#playBtn の background 一括指定など）に負けないよう !important で上書きする */
+  button.hasIcon{ font-size:0 !important; color:transparent !important; padding:0 !important; border:0 !important; border-radius:0 !important;
+    background-color:transparent !important; -webkit-backdrop-filter:none !important; backdrop-filter:none !important;
+    background-size:contain !important; background-position:center !important; background-repeat:no-repeat !important; }
   #listBtn{
     position:fixed; top:0; right:16px; margin-top:calc(14px + env(safe-area-inset-top,0px));
     font:500 12.5px/1 inherit; font-family:inherit; color:var(--ink);
@@ -1464,10 +1468,31 @@ function cyclePlayMode(){
 /* ---- 再生の UI ---- */
 /* 手描きアイコン：ここに画像の URL か data:URI を入れる。空なら文字のまま。
    例：ICONS.play = 'data:image/png;base64,....' */
-const ICONS = { play:'', pause:'', prev:'', next:'', list:'', mute:'', unmute:'', modeSingle:'', modeAll:'', modeShuffle:'', birdOn:'', birdOff:'' };
+/* 手描きのボタン：assets/ui/ に置くだけで差し替わる（無いボタンは今の見た目のまま）。
+   画像は表示サイズの3倍で描く。ボタン全体（円・縁取り・地）を描く。寸法の一覧は orgel_handoff.md §7 */
+const ICON_FILES = {   // key: [ファイル名, 表示の幅, 高さ]
+  play:['icon_play.png', 54, 54], pause:['icon_pause.png', 54, 54], prev:['icon_prev.png', 44, 44], next:['icon_next.png', 44, 44],
+  list:['icon_list.png', 90, 38], modeSingle:['icon_mode_single.png', 59, 29], modeAll:['icon_mode_all.png', 59, 29], modeShuffle:['icon_mode_shuffle.png', 59, 29],
+  birdOn:['icon_bird_on.png', 52, 29], birdOff:['icon_bird_off.png', 52, 29], unmute:['icon_unmute.png', 32, 21], mute:['icon_mute.png', 32, 21],
+};
+const ICON_DIR = PARAMS.get('icondir') || '../assets/ui/';   // ?icondir= は確認用
+const ICONS = {};                                             // 読み込めた画像の URL
+const iconRefresh = [];                                       // 画像が届いたときに見た目を更新する関数
 function setIcon(btn, key, text){
-  if(ICONS[key]){ btn.classList.add('hasIcon'); btn.style.backgroundImage = `url("${ICONS[key]}")`; btn.setAttribute('aria-label', text); btn.textContent = text; }
-  else { btn.classList.remove('hasIcon'); btn.style.backgroundImage = ''; btn.textContent = text; }
+  btn.setAttribute('aria-label', text);
+  btn.textContent = text;
+  if(ICONS[key]){
+    const [, w, h] = ICON_FILES[key];
+    btn.classList.add('hasIcon'); btn.style.backgroundImage = `url("${ICONS[key]}")`;
+    btn.style.width = w + 'px'; btn.style.height = h + 'px';
+  } else {
+    btn.classList.remove('hasIcon'); btn.style.backgroundImage = ''; btn.style.width = ''; btn.style.height = '';
+  }
+}
+for(const key in ICON_FILES){
+  const url = ICON_DIR + ICON_FILES[key][0], img = new Image();
+  img.onload = ()=>{ ICONS[key] = url; for(const f of iconRefresh) f(); };
+  img.src = url;
 }
 const npTitle = document.getElementById('npTitle'), npSubtitle = document.getElementById('npSubtitle');
 const playBtn = document.getElementById('playBtn'), prevBtn = document.getElementById('prevBtn'), nextBtn = document.getElementById('nextBtn');
@@ -1503,7 +1528,13 @@ document.addEventListener('visibilitychange', ()=>{
   if(!document.hidden && audioCtx && audioCtx.state === 'suspended' && isPlaying) audioCtx.resume();
 });
 updateModeBtn(); setVolume(volSlider.value/100); updateNowPlaying();
-setIcon(prevBtn, 'prev', '⏮'); setIcon(nextBtn, 'next', '⏭'); setIcon(listBtn, 'list', '🎵 曲一覧'); setIcon(muteBtn, 'unmute', '🔊');
+function refreshPlayerIcons(){
+  updatePlayBtn(); updateModeBtn();
+  setIcon(prevBtn, 'prev', '⏮'); setIcon(nextBtn, 'next', '⏭'); setIcon(listBtn, 'list', '🎵 曲一覧');
+  setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊');
+}
+iconRefresh.push(refreshPlayerIcons);
+refreshPlayerIcons();
 /* 外枠の画像：あれば当てる。無ければ（読み込み失敗なら）今の枠のまま */
 const FRAME_SRC = PARAMS.get('frame') || '../assets/ui/player_frame.png';   // ?frame= は確認用
 const FRAME_SCALE = 3;                                                      // 画像は表示サイズの3倍で描く
@@ -2433,6 +2464,7 @@ function updateBirdBtn(){
   birdBtn.setAttribute('aria-label', birdVoice ? '鳥の声：オン' : '鳥の声：オフ');
 }
 birdBtn.addEventListener('click', ()=>setBirdVoice(!birdVoice));
+iconRefresh.push(updateBirdBtn);
 updateBirdBtn();
 
 const raycaster = new THREE.Raycaster(), _ndc = new THREE.Vector2();

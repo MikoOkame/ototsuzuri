@@ -192,7 +192,18 @@
 
 ## 7. 操作と機能の範囲
 - 残す：v10 の再生・一時停止・前後の曲・曲一覧・再生モード・音量。配置は画面下（確定）。
-- **アイコンと外枠はユーザーが手描きする。** アイコンは `src/orgel_dev.html` の `ICONS`（play／pause／prev／next／list／mute／unmute／modeSingle／modeAll／modeShuffle／birdOn／birdOff）に画像を入れると差し替わる。
+- **ボタンと外枠はユーザーが手描きする。** ボタンは **ボタン全体**（円・縁取り・地の色も）を描く方式（確定）。`assets/ui/` に下のファイル名で置くだけで差し替わり、置いたボタンは CSS の縁取りと地の色を消して画像だけで描く。無いボタンは今の見た目のまま。画像は表示の3倍で描く。PNG・背景透過。確認用に `?icondir=フォルダ/` で別の場所の画像を当てられる。
+
+| ボタン | ファイル名 | 描くサイズ | 表示サイズ |
+|---|---|---|---|
+| 再生／一時停止 | `icon_play.png`／`icon_pause.png` | 162 × 162 | 54 × 54 |
+| 前の曲／次の曲 | `icon_prev.png`／`icon_next.png` | 132 × 132 | 44 × 44 |
+| 曲一覧 | `icon_list.png` | 270 × 114 | 90 × 38 |
+| 再生モード（1曲／全曲／シャッフル） | `icon_mode_single.png`／`icon_mode_all.png`／`icon_mode_shuffle.png` | 177 × 87 | 59 × 29 |
+| 鳥の声（オン／オフ） | `icon_bird_on.png`／`icon_bird_off.png` | 156 × 87 | 52 × 29 |
+| 音あり／消音 | `icon_unmute.png`／`icon_mute.png` | 96 × 63 | 32 × 21 |
+
+寸法を変えるときは `ICON_FILES`（`src/orgel_dev.html`）の表示サイズを直す。文字の入るボタン（曲一覧・モード・鳥の声）は文字も絵に描き込む。
 - プレーヤーの横幅は最大 520px（`--player-max`）。広い画面では中央に寄せる。
 
 ### プレーヤーの外枠の画像（手描き）
