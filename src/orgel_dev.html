@@ -1828,27 +1828,61 @@ function updateNotes(dt){
 ================================================================ */
 const ASSET_BASE = '../assets/';
 const BIRD_FILES = { plain:'bird_mdl/glb/MyBird_v1.1_notex.glb', outline:'bird_mdl/glb/MyBird_v1.1_outline_notex.glb' };
-const BIRD_TEX_IDS = ['01_shiro','02_shirube','03_momo','04_sumire','05_minamo','06_sora','07_kinako','08_ame','09_kurumi','10_hoshi','11_tsuki'];
+/* ---- 鳥の対応表（図鑑）：id → テクスチャ・大きさ・出やすさ ----
+   新しい鳥は assets/bird_mdl/texture/ に tex_bird_番号_id.png を置き、ここに1行足すだけで出る。
+   読み込むのは src/tex/ の軽い JPEG（同名 .jpg）。無ければ assets/ の PNG をそのまま使う（重いが動く）。
+   JPEG の作り方は orgel_handoff.md §6。大きさは羽結びと同じ。weight は抽選の重み（大きいほど出やすい）。 */
+const BIRD_BOOK = [
+  { id:'shiro',   file:'tex_bird_01_shiro',   scale:1,    weight:1 },
+  { id:'shirube', file:'tex_bird_02_shirube', scale:1.18, weight:1 },
+  { id:'momo',    file:'tex_bird_03_momo',    scale:1,    weight:1 },
+  { id:'sumire',  file:'tex_bird_04_sumire',  scale:1,    weight:1 },
+  { id:'minamo',  file:'tex_bird_05_minamo',  scale:1,    weight:1 },
+  { id:'sora',    file:'tex_bird_06_sora',    scale:1,    weight:1 },
+  { id:'kinako',  file:'tex_bird_07_kinako',  scale:1,    weight:1 },
+  { id:'ame',     file:'tex_bird_08_ame',     scale:.92,  weight:1 },
+  { id:'kurumi',  file:'tex_bird_09_kurumi',  scale:1.05, weight:1 },
+  { id:'hoshi',   file:'tex_bird_10_hoshi',   scale:1,    weight:1 },
+  { id:'tsuki',   file:'tex_bird_11_tsuki',   scale:1,    weight:1 },
+];
+const bookOf = id => BIRD_BOOK.find(e=>e.id === id);
+// 抽選：重み付きで1羽。exclude の id は選ばない（同じ鳥を同時に2羽出さない）
+function drawBird(exclude){
+  const pool = BIRD_BOOK.filter(e=>!exclude.has(e.id) && e.weight > 0);
+  let r = Math.random()*pool.reduce((a, e)=>a + e.weight, 0);
+  for(const e of pool){ r -= e.weight; if(r <= 0) return e; }
+  return pool[pool.length - 1];
+}
+// テクスチャ：画面に出る鳥の分だけ読み込み、帰った鳥の分は解放する。届くまで待つ（届く前にマテリアルを作ると黒いまま居座る）
 const birdTexCache = {};
-// テクスチャは届くまで待つ（届く前にマテリアルを作ると、到着後も黒いままになることがある）
+function loadTexFrom(url){
+  return new THREE.TextureLoader().loadAsync(url).then(t=>{ t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; return t; });
+}
 function birdTex(id){
   if(!birdTexCache[id]){
-    birdTexCache[id] = new THREE.TextureLoader().loadAsync('tex/tex_bird_' + id + '.jpg')   // 1024 の JPEG（原本は assets/。透過は体には不要）
-      .then(t=>{ t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; return t; });
+    const e = bookOf(id);
+    birdTexCache[id] = loadTexFrom('tex/' + e.file + '.jpg').catch(()=>loadTexFrom(ASSET_BASE + 'bird_mdl/texture/' + e.file + '.png'));
   }
   return birdTexCache[id];
 }
+function releaseBirdTex(id){
+  const p = birdTexCache[id]; if(!p) return;
+  delete birdTexCache[id];
+  p.then(t=>t.dispose()).catch(()=>{});
+}
+// ?birds=hoshi,tsuki,shirube：出す鳥を指定する（確認用。手すり左・手すり右・窓台の順。指定した間は抽選しない）
+const FIXED_BIRDS = (PARAMS.get('birds') || '').split(',').map(x=>x.trim()).filter(x=>bookOf(x));
 const birdSrc = {};          // 読み込んだ glb（複製の元）
 const birds = [];            // 置いた鳥
 const BIRD_VARIANT = 'plain';   // 'plain'（輪郭線なし）／'outline'（輪郭線あり版）。今は輪郭線なし
-function makeBird(texId, idx, tex){
+function makeBird(idx){
   const src = birdSrc[BIRD_VARIANT]; if(!src) return null;
   const model = SkeletonUtils.clone(src.scene);
   let body = null;
   model.traverse(o=>{
     if(!o.isSkinnedMesh) return;
     if(/outline/i.test(o.name)){ o.material = new THREE.MeshBasicMaterial({ color:0x4a3a44 }); }
-    else { body = o; o.material = new THREE.MeshToonMaterial({ map:tex, gradientMap:gradMap }); o.material.needsUpdate = true; }
+    else { body = o; o.material = new THREE.MeshToonMaterial({ gradientMap:gradMap }); }
     o.frustumCulled = false;
   });
   const mixer = new THREE.AnimationMixer(model);
@@ -1858,7 +1892,7 @@ function makeBird(texId, idx, tex){
   // 音域：鳥ごとに1オクターブずつ分ける（触れて鳴らす音）
   const RANGES = [[72,84],[76,88],[81,93]];   // さえずりは高め。羽結びの 72〜93 を3羽で分ける
   const bird = { model, mixer, clips, body, neck, head, neckClip:new THREE.Quaternion(), headClip:new THREE.Quaternion(),
-    current:null, state:'', wait:0, idx, range:RANGES[idx % 3], id:texId.slice(3), cents:voiceCents(texId.slice(3)),
+    current:null, state:'', wait:0, idx, range:RANGES[idx % 3], id:'', cents:0, needDraw:true, loading:false,
     yaw:0, pitch:0, tilt:0, tiltT:0, lookAt:null, lookT:0, singBeat:-1 };
   // 当たり判定：見た目より大きい球
   const hit = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 6), new THREE.MeshBasicMaterial({ visible:false }));
@@ -1874,6 +1908,27 @@ function makeBird(texId, idx, tex){
   };
   scene.add(model); birds.push(bird);
   return bird;
+}
+/* ---- 定位置に鳥を当てる：抽選（または ?birds の指定）→ テクスチャが届いたら、テクスチャ・大きさ・声の高さを替える ---- */
+function assignBird(b){
+  if(b.loading) return;
+  const used = new Set(birds.filter(o=>o !== b && o.id).map(o=>o.id));
+  const fixed = FIXED_BIRDS[b.idx];
+  const e = fixed && !used.has(fixed) ? bookOf(fixed) : drawBird(used);
+  b.loading = true; b.id = e.id;
+  return birdTex(e.id).then(tex=>{
+    b.body.material.map = tex; b.body.material.needsUpdate = true;
+    b.model.scale.setScalar(e.scale);
+    b.cents = voiceCents(e.id); b.lastPitch = 0;
+    b.loading = false; b.needDraw = false;
+  });
+}
+// 帰った鳥：テクスチャを解放し、次に戻るときに抽選し直す
+function retireBird(b){
+  if(!b.id) return;
+  const id = b.id; b.id = ''; b.needDraw = true;
+  b.body.material.map = null; b.body.material.needsUpdate = true;
+  releaseBirdTex(id);
 }
 /* ---- 首の向き（羽結び H節）----
    首4割・頭6割。Maya の関節の向きのせいでローカル軸で回すとねじれるので、
@@ -2096,7 +2151,7 @@ function updateFlight(b, dt){
   if(f.dir > 0 && !f.landed && s > .72){ f.landed = true; setAnim(b, 'landing', false, .3, true); }
   if(s >= 1){
     if(f.dir > 0){ b.model.position.copy(b.home.pos); b.model.rotation.y = b.home.rotY; enterPerch(b); }
-    else { b.mode = 'away'; b.model.visible = false; b.arriveAt = -1; }
+    else { b.mode = 'away'; b.model.visible = false; b.arriveAt = -1; retireBird(b); }
   }
 }
 function enterPerch(b){
@@ -2172,6 +2227,7 @@ function birdsUpdate(dt){
   for(const b of birds){
     const want = wantPresent(b, dayT);
     if(want && b.mode === 'away'){
+      if(b.needDraw || b.loading){ if(!b.loading) assignBird(b); continue; }   // 顔ぶれを決めてテクスチャが届くまで待つ
       if(b.arriveAt < 0){ b.arriveAt = clock + stagger + Math.random()*1.2; stagger += 1.1 + Math.random()*.9; }
       if(clock >= b.arriveAt) beginArrive(b);
     } else if(!want && b.mode !== 'away' && !(b.mode === 'fly' && b.fl.dir < 0)){
@@ -2320,30 +2376,28 @@ function pickBird(clientX, clientY){
 
 async function loadBirds(){
   const loader = new GLTFLoader();
-  // モデルとテクスチャを全部待ってから出す（途中で出すと黒い鳥が居座る）
-  const [glb, tA, tB, tC] = await Promise.all([
-    loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]), birdTex('01_shiro'), birdTex('03_momo'), birdTex('06_sora')
-  ]);
-  birdSrc[BIRD_VARIANT] = glb;
-  // 仮の3羽。モデルの正面は +z（rotation.y = 0 で部屋を向く）
+  birdSrc[BIRD_VARIANT] = await loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]);
+  // 定位置は3つ（手すり左・手すり右・窓台）。どの鳥が来るかは抽選。モデルの正面は +z（rotation.y = 0 で部屋を向く）
   // outside：窓の外（手すり）。夜、座り始める前に帰り（leaveT）、夜明けに戻る（backT）。室内の鳥はずっと居る
   const defs = [
-    // 外の鳥は、座って休み始める約10秒前に帰る（shiro が少し先、momo が後）
-    { tex:'01_shiro', tx:tA, pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:beforeSit(14), backT:.07 },
-    { tex:'03_momo',  tx:tB, pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:beforeSit(10), backT:.095 },
-    { tex:'06_sora',  tx:tC, pos:[.52, SILL_TOP, .2],             rotY:-Math.PI/4,  outside:false },   // 体は斜め45°。カーテン（x≥.875）に掛からない位置
+    // 外の鳥は、座って休み始める約10秒前に帰る（手すり左が少し先、右が後）。夜明けに抽選し直した鳥が戻る
+    { pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:beforeSit(14), backT:.07 },
+    { pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:beforeSit(10), backT:.095 },
+    { pos:[.52, SILL_TOP, .2],             rotY:-Math.PI/4,  outside:false },   // 窓台：ずっと居る。体は斜め45°。カーテン（x≥.875）に掛からない位置
   ];
   defs.forEach((d, i)=>{
-    const b = makeBird(d.tex, i, d.tx);
+    const b = makeBird(i);
     b.home = { pos:new THREE.Vector3(...d.pos), rotY:d.rotY };
     b.outside = d.outside; b.leaveT = d.leaveT; b.backT = d.backT;
     b.mode = 'away'; b.arriveAt = -1; b.leaveAt = -1; b.singing = false; b.singOrder = 0; b.quietUntil = 0;
     b.seated = false; b.standT = 0; b.anim = ''; b.singPhase = 0; b.lastPitch = 0;
     b.model.position.copy(b.home.pos); b.model.rotation.y = b.home.rotY;
     b.model.visible = false;
-    // ?birds：最初から定位置に居る（確認用）
-    if(firstPlayDone && wantPresent(b, dayT)){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   });
+  // 最初に開いたときに、その時刻に居る鳥の顔ぶれを抽選してテクスチャを読む（夜は窓台の1羽だけ）
+  await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && (dayT >= b.backT && dayT < b.leaveT)).map(assignBird));
+  // ?birds：最初から定位置に居る（確認用）
+  for(const b of birds) if(firstPlayDone && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.home.pos).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
 }
 loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
@@ -2434,7 +2488,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
-    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT };
+    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
 refreshSpeedButtons();
 function refreshDebug(){
