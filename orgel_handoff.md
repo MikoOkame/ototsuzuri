@@ -22,7 +22,7 @@
 | `src/tex/` | 鳥のテクスチャの軽量版 `tex_bird_番号_id.jpg`（1024、約 80 KB）。実際に読み込むのはこちら。作り方は §6 | 原本から作る |
 | `assets/notes/` | 音符PNG（羽結びの3枚） | |
 | `assets/ui/player_frame.png` | プレーヤーの外枠（ユーザーの手描き。後から入る）。描き方は §7 | 無ければ今の枠 |
-| `assets/box/` | ユーザーが作る箱の .glb（後から入る） | |
+| `assets/box/` | ユーザーが作る箱の .glb（後から入る）。`orgel_umiwatari.fbx` は今のオルゴール（仮の箱＋機構、うみわたりのうた）を書き出したもの。Maya で箱を作るときの下敷き | FBX は書き出し物（§5） |
 
 ## 2. 技術の決まり
 - three.js 0.160 に統一（importmap で `three` と `three/addons/` を unpkg から読む）。試作2本は r128 なので移植時に書き換える。
@@ -118,7 +118,7 @@
    - 単位は実寸の m（窓辺の 0.02 倍を形に焼き込む）。`MechAnchor`（機構の底面中心）の空オブジェクトを入れる。
    - 材質は色だけ（Brass／Brass_Dark／Steel／Steel_Dark／Lead／Wood／Wood_Dark／Inlay／Lining／Keyhole／Pin）。トゥーンの陰影は Maya で付け直す。
 2. Blender（bpy 4.2）で GLB を読み、FBX に書き出す：`bpy.ops.export_scene.fbx(apply_unit_scale=True, apply_scale_options='FBX_SCALE_UNITS', axis_forward='-Z', axis_up='Y', object_types={'EMPTY','MESH'}, add_leaf_bones=False, bake_anim=False)`。FBX の単位は UnitScaleFactor 100（Maya では cm に換算されて 26.8 × 13.4 × 22.4 cm になる）、Y が上。
-- 書き出し済み：うみわたりのうた（櫛歯19本、部品180、メッシュ148）。
+- 書き出し済み：うみわたりのうた（櫛歯19本、部品180、メッシュ148）→ `assets/box/orgel_umiwatari.fbx`（ユーザーの許可を得て追加）。
 
 ### 箱の差し替え
 ユーザーが Maya で作る箱（.glb）に差し替えられること。仕様は旧試作と同じ。
