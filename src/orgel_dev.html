@@ -55,10 +55,15 @@
   #dbg #tLabel{ min-width:9em; }
   /* 再生の操作（v10 の構成。鍵盤はない）
      アイコンと外枠はユーザーの手描きに差し替える前提。
-     ICONS（script 冒頭）に画像を入れるとボタンの文字の代わりに表示される。
-     外枠は --player-frame に画像（border-image 用）を入れる。 */
-  :root{ --player-frame:none; }
-  #player.framed{ background:none; border:0; border-image:var(--player-frame) 30 fill / 30px stretch; -webkit-backdrop-filter:none; backdrop-filter:none; }
+     アイコン：ICONS（script 内）に画像を入れるとボタンの文字の代わりに表示される。
+     外枠：assets/ui/player_frame.png を置くだけで差し替わる（無いあいだは今の枠）。9分割で使う。
+       --frame-corner  画面上の隅の寸法（四隅は変形させない）。画像の切り位置はこの3倍（3倍で描く前提）
+       上下左右の辺は伸ばさずに繰り返す（round）。中央の地は今の背景のまま */
+  :root{ --frame-corner:60px; --player-max:520px; }
+  #player.has-frame{
+    border:1px solid transparent; border-image-source:var(--frame-img);
+    border-image-width:var(--frame-corner); border-image-repeat:round;   /* border-image-slice は JS が隅×3 で入れる */
+  }
   button.hasIcon{ font-size:0; background-size:contain; background-position:center; background-repeat:no-repeat; }
   #listBtn{
     position:fixed; top:0; right:16px; margin-top:calc(14px + env(safe-area-inset-top,0px));
@@ -67,7 +72,8 @@
     -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); cursor:pointer;
   }
   #player{
-    position:fixed; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    position:fixed; left:50%; transform:translateX(-50%); width:calc(100% - 24px); max-width:var(--player-max);   /* 広い画面では中央に寄せる */
+    bottom:calc(12px + env(safe-area-inset-bottom,0px));
     padding:10px 14px 8px; border-radius:16px; background:var(--panel); border:1px solid var(--line);
     -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
   }
@@ -1431,7 +1437,7 @@ function cyclePlayMode(){
 /* ---- 再生の UI ---- */
 /* 手描きアイコン：ここに画像の URL か data:URI を入れる。空なら文字のまま。
    例：ICONS.play = 'data:image/png;base64,....' */
-const ICONS = { play:'', pause:'', prev:'', next:'', list:'', mute:'', unmute:'', modeSingle:'', modeAll:'', modeShuffle:'', birdOn:'', birdOff:'', frame:'' };
+const ICONS = { play:'', pause:'', prev:'', next:'', list:'', mute:'', unmute:'', modeSingle:'', modeAll:'', modeShuffle:'', birdOn:'', birdOff:'' };
 function setIcon(btn, key, text){
   if(ICONS[key]){ btn.classList.add('hasIcon'); btn.style.backgroundImage = `url("${ICONS[key]}")`; btn.setAttribute('aria-label', text); btn.textContent = text; }
   else { btn.classList.remove('hasIcon'); btn.style.backgroundImage = ''; btn.textContent = text; }
@@ -1471,7 +1477,20 @@ document.addEventListener('visibilitychange', ()=>{
 });
 updateModeBtn(); setVolume(volSlider.value/100); updateNowPlaying();
 setIcon(prevBtn, 'prev', '⏮'); setIcon(nextBtn, 'next', '⏭'); setIcon(listBtn, 'list', '🎵 曲一覧'); setIcon(muteBtn, 'unmute', '🔊');
-if(ICONS.frame){ document.documentElement.style.setProperty('--player-frame', `url("${ICONS.frame}")`); document.getElementById('player').classList.add('framed'); }
+/* 外枠の画像：あれば当てる。無ければ（読み込み失敗なら）今の枠のまま */
+const FRAME_SRC = PARAMS.get('frame') || '../assets/ui/player_frame.png';   // ?frame= は確認用
+const FRAME_SCALE = 3;                                                      // 画像は表示サイズの3倍で描く
+{
+  const img = new Image();
+  img.onload = ()=>{
+    const player = document.getElementById('player');
+    const corner = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--frame-corner')) || 60;
+    player.style.setProperty('--frame-img', `url("${FRAME_SRC}")`);
+    player.style.borderImageSlice = String(Math.round(corner*FRAME_SCALE));
+    player.classList.add('has-frame');
+  };
+  img.src = FRAME_SRC;
+}
 
 /* ================================================================
    オルゴール：機構と仮の箱。試作（ref/orgel_mechanism.html）の構成を縮めて窓台に載せる。
