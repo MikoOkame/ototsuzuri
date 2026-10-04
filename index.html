@@ -918,15 +918,15 @@ const lhX = 19, lhZ = -47, lhY = groundY(19,-47);
 const lh = new THREE.Group();
 lh.position.set(lhX, lhY - .3, lhZ);
 scene.add(lh);
-const lhWhite = toon(0xf4ece2), lhRed = toon(0xb86a6a);
-[[0,1.4,.95,1.1,lhWhite],[1.4,2.4,.85,.95,lhRed],[2.4,3.6,.75,.85,lhWhite],[3.6,4.4,.68,.75,lhRed]].forEach(([y0,y1,rt,rb,m])=>{
+const lhWhite = toon(0xece3d0), lhBlue = toon(0x5a7398);   // 生成りと落ち着いた青のしましま（lhBlue は名前だけ残る青）
+[[0,1.4,.95,1.1,lhWhite],[1.4,2.4,.85,.95,lhBlue],[2.4,3.6,.75,.85,lhWhite],[3.6,4.4,.68,.75,lhBlue]].forEach(([y0,y1,rt,rb,m])=>{
   const c = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, y1-y0, 14), m);
   c.position.y = (y0+y1)/2; lh.add(c); addOutline(c, .05, OUT_EX);
 });
 const lanternMat = new THREE.MeshBasicMaterial({ color:0xffe6a8 });
 const lantern = new THREE.Mesh(new THREE.CylinderGeometry(.5,.55,.6,12), lanternMat);
 lantern.position.y = 4.7; lh.add(lantern);
-const cap = new THREE.Mesh(new THREE.ConeGeometry(.75,.6,12), lhRed);
+const cap = new THREE.Mesh(new THREE.ConeGeometry(.75,.6,12), lhBlue);
 cap.position.y = 5.3; lh.add(cap); addOutline(cap, .05, OUT_EX);
 const lhGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffe2a0, transparent:true,
   depthWrite:false, blending:THREE.AdditiveBlending }));
@@ -1035,13 +1035,24 @@ for(let k=0;k<7;k++){
   lf.rotation.set(Math.sin(a)*.5, 0, -Math.cos(a)*.5);
   scene.add(lf);
 }
-const glassMat = inToon(0xb9d2ea, { transparent:true, opacity:.5 });
-const bottle = new THREE.Mesh(new THREE.CylinderGeometry(.048,.052,.18,16), glassMat);
-bottle.position.set(BOTTLE_X, SILL_TOP + .09, SMALL_Z); scene.add(bottle); addOutline(bottle, .008, OUT_IN);
-const bneck = new THREE.Mesh(new THREE.CylinderGeometry(.018,.03,.07,12), glassMat);
-bneck.position.set(BOTTLE_X, SILL_TOP + .215, SMALL_Z); scene.add(bneck);
-const cork = new THREE.Mesh(new THREE.CylinderGeometry(.02,.019,.035,10), inToon(0xc9a37a));
-cork.position.set(BOTTLE_X, SILL_TOP + .265, SMALL_Z); scene.add(cork);
+/* ボトルメール：まっすぐな円柱2つ（胴と首）。透明感のある薄水色。中に巻いた手紙、口に薄い色のコルク */
+const glassMat = inToon(0xbfe6ee, { transparent:true, opacity:.38, depthWrite:false });
+const BODY_R = .05, BODY_H = .17, NECK_R = .02, NECK_H = .055;
+const bottle = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, BODY_H, 20), glassMat);
+bottle.position.set(BOTTLE_X, SILL_TOP + BODY_H/2, SMALL_Z); bottle.renderOrder = 2; scene.add(bottle); addOutline(bottle, .006, OUT_IN);
+const bneck = new THREE.Mesh(new THREE.CylinderGeometry(NECK_R, NECK_R, NECK_H, 14), glassMat);
+bneck.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H/2, SMALL_Z); bneck.renderOrder = 2; scene.add(bneck); addOutline(bneck, .004, OUT_IN);
+// 中の手紙：巻いた紙（生成り）に紐（赤茶）。胴にはみ出さない大きさで斜めに入れ、底に当てる
+//   幅 = 長さ×sin傾き + 直径×cos傾き ≤ 胴の内径、高さ = 長さ×cos傾き + 直径×sin傾き ≤ 胴の内側の高さ
+const LT_R = .02, LT_L = .15, LT_TILT = .3;
+const ltH = LT_L*Math.cos(LT_TILT) + 2*LT_R*Math.sin(LT_TILT);
+const letter = new THREE.Mesh(new THREE.CylinderGeometry(LT_R, LT_R, LT_L, 14), inToon(0xf3ead6));
+letter.rotation.z = LT_TILT; letter.position.set(BOTTLE_X, SILL_TOP + .008 + ltH/2, SMALL_Z); scene.add(letter);
+const twine = new THREE.Mesh(new THREE.CylinderGeometry(LT_R + .0015, LT_R + .0015, .014, 14), inToon(0xa0584a));
+twine.rotation.z = LT_TILT; twine.position.copy(letter.position); scene.add(twine);
+// コルク：口より少し細く（首の内側に差し込む）。上が少し出る
+const cork = new THREE.Mesh(new THREE.CylinderGeometry(NECK_R*.82, NECK_R*.82, .032, 12), inToon(0xe4cfa6));
+cork.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H - .006, SMALL_Z); scene.add(cork); addOutline(cork, .003, OUT_IN);
 
 /* 外開きの窓 */
 const casMat = inToon(0xf5efe6);
@@ -1848,10 +1859,28 @@ const BOX_Z = RAIL_Z - RAIL_HALF_D - HOOK_T - BOX_D/2;               // 手す�
     box(HOOK_W, HOOK_T, zOut - zFront + HOOK_T, iron, x, yBot, (zOut + zFront)/2, scene, .006, OUT_EX);
     box(HOOK_W, .07, HOOK_T, iron, x, yBot + .035, zFront, scene, .006, OUT_EX);
   });
+  const flowers = [];
   for(let k=0;k<11;k++){
-    const fl = new THREE.Mesh(new THREE.SphereGeometry(.035 + rnd()*.02, 8, 6), toon(pick(petals)));
+    const r = .035 + rnd()*.02;
+    const fl = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), toon(pick(petals)));
     fl.position.set(px - .3 + rnd()*.6, BOX_TOP + .025 + rnd()*.05, BOX_Z + (rnd()-.5)*.1);   // 手すりの上端（+.05）を少し越える
+    fl.userData.r = r; flowers.push(fl);
     scene.add(fl);
+  }
+  // 大きく重なった花だけを離す（中心どうしが半径の和の 0.75 倍より近いもの）。並びは不揃いのまま残す
+  for(let pass=0; pass<12; pass++){
+    for(let i=0;i<flowers.length;i++) for(let j=i+1;j<flowers.length;j++){
+      const a = flowers[i].position, b = flowers[j].position;
+      const want = (flowers[i].userData.r + flowers[j].userData.r)*.75;
+      const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-4;
+      if(d >= want) continue;
+      const push = (want - d)/2, ux = d > 1e-4 ? dx/d : 1, uz = d > 1e-4 ? dz/d : 0;
+      a.x -= ux*push; a.z -= uz*push; b.x += ux*push; b.z += uz*push;
+    }
+    for(const f of flowers){   // 箱の上からはみ出さない
+      f.position.x = THREE.MathUtils.clamp(f.position.x, px - .32, px + .32);
+      f.position.z = THREE.MathUtils.clamp(f.position.z, BOX_Z - .07, BOX_Z + .07);
+    }
   }
   for(let k=0;k<8;k++){
     const lf = new THREE.Mesh(new THREE.SphereGeometry(.04, 6, 5), toon(0x7fa58c));
@@ -1863,6 +1892,9 @@ const BOX_Z = RAIL_Z - RAIL_HALF_D - HOOK_T - BOX_D/2;               // 手す�
 // ランタン：右の角の支柱を上に伸ばし、その先端に載せる（灯りの位置は手すりの上 20cm のまま）
 box(.045, .10, .045, iron, 1.75, RAIL_TOP + .05, RAIL_Z, scene, .008, OUT_EX);                 // 伸ばした支柱（手すりの上 0〜10cm）
 box(.13, .02, .13, iron, 1.75, RAIL_TOP + .11, RAIL_Z, scene, .008, OUT_EX);                   // 受け皿（上面がランタンの底 = 手すりの上 12cm）
+// ランタンの無い左の角：支柱を少し上に伸ばし、先に立方体の飾り
+box(.045, .06, .045, iron, -1.75, RAIL_TOP + .03, RAIL_Z, scene, .008, OUT_EX);
+box(.075, .075, .075, iron, -1.75, RAIL_TOP + .06 + .0375, RAIL_Z, scene, .008, OUT_EX);
 const lanternBox = box(.11, .16, .11, new THREE.MeshBasicMaterial({ color:0xffdca0 }), 1.75, RAIL_TOP + .2, RAIL_Z, scene, .012, OUT_EX);
 box(.14, .03, .14, iron, 1.75, RAIL_TOP + .295, RAIL_Z);
 const lanternGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffcf88, transparent:true,
