@@ -111,6 +111,15 @@
 - 予約は `ref/web-audio-bgm-design.md` §2 の先読み方式で行う。予約範囲の先読み時間を、シリンダーの現在の回転速度で曲上の位置に換算する。
 - 鳥に触れて鳴らす音は効果音の連打になる。同指針 §1 のノード切断と §8「効果音を連続で鳴らしても蓄積しないか」を必ず確認する。
 
+### FBX への書き出し（制作用）
+オルゴール（箱・機構・櫛歯・ピン）を、Maya で読める FBX に書き出せる。
+1. `src/orgel_dev.html?export` を開き、`window.__exportOrgel('曲の id')` を呼ぶと GLB（base64）が返る。ピンと櫛歯はその曲から作る。
+   - 輪郭線の殻は外す。ピンは1本ずつのメッシュ（`Pin_001`〜）。動く部品は静止の姿勢、蓋は閉じた状態（`Lid` は原点が蝶番、ローカル X で開く）。
+   - 単位は実寸の m（窓辺の 0.02 倍を形に焼き込む）。`MechAnchor`（機構の底面中心）の空オブジェクトを入れる。
+   - 材質は色だけ（Brass／Brass_Dark／Steel／Steel_Dark／Lead／Wood／Wood_Dark／Inlay／Lining／Keyhole／Pin）。トゥーンの陰影は Maya で付け直す。
+2. Blender（bpy 4.2）で GLB を読み、FBX に書き出す：`bpy.ops.export_scene.fbx(apply_unit_scale=True, apply_scale_options='FBX_SCALE_UNITS', axis_forward='-Z', axis_up='Y', object_types={'EMPTY','MESH'}, add_leaf_bones=False, bake_anim=False)`。FBX の単位は UnitScaleFactor 100（Maya では cm に換算されて 26.8 × 13.4 × 22.4 cm になる）、Y が上。
+- 書き出し済み：うみわたりのうた（櫛歯19本、部品180、メッシュ148）。
+
 ### 箱の差し替え
 ユーザーが Maya で作る箱（.glb）に差し替えられること。仕様は旧試作と同じ。
 - `MechAnchor` という名の空オブジェクトがあれば、機構の底面中心をそこに合わせる。なければ中央に置き、高さを調整できるようにする。
