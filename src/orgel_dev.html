@@ -1858,10 +1858,28 @@ const BOX_Z = RAIL_Z - RAIL_HALF_D - HOOK_T - BOX_D/2;               // 手す�
     box(HOOK_W, HOOK_T, zOut - zFront + HOOK_T, iron, x, yBot, (zOut + zFront)/2, scene, .006, OUT_EX);
     box(HOOK_W, .07, HOOK_T, iron, x, yBot + .035, zFront, scene, .006, OUT_EX);
   });
+  const flowers = [];
   for(let k=0;k<11;k++){
-    const fl = new THREE.Mesh(new THREE.SphereGeometry(.035 + rnd()*.02, 8, 6), toon(pick(petals)));
+    const r = .035 + rnd()*.02;
+    const fl = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), toon(pick(petals)));
     fl.position.set(px - .3 + rnd()*.6, BOX_TOP + .025 + rnd()*.05, BOX_Z + (rnd()-.5)*.1);   // 手すりの上端（+.05）を少し越える
+    fl.userData.r = r; flowers.push(fl);
     scene.add(fl);
+  }
+  // 大きく重なった花だけを離す（中心どうしが半径の和の 0.75 倍より近いもの）。並びは不揃いのまま残す
+  for(let pass=0; pass<12; pass++){
+    for(let i=0;i<flowers.length;i++) for(let j=i+1;j<flowers.length;j++){
+      const a = flowers[i].position, b = flowers[j].position;
+      const want = (flowers[i].userData.r + flowers[j].userData.r)*.75;
+      const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-4;
+      if(d >= want) continue;
+      const push = (want - d)/2, ux = d > 1e-4 ? dx/d : 1, uz = d > 1e-4 ? dz/d : 0;
+      a.x -= ux*push; a.z -= uz*push; b.x += ux*push; b.z += uz*push;
+    }
+    for(const f of flowers){   // 箱の上からはみ出さない
+      f.position.x = THREE.MathUtils.clamp(f.position.x, px - .32, px + .32);
+      f.position.z = THREE.MathUtils.clamp(f.position.z, BOX_Z - .07, BOX_Z + .07);
+    }
   }
   for(let k=0;k<8;k++){
     const lf = new THREE.Mesh(new THREE.SphereGeometry(.04, 6, 5), toon(0x7fa58c));
