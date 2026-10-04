@@ -108,6 +108,8 @@
   #dbg{ bottom:calc(186px + env(safe-area-inset-bottom,0px)); }
   /* フレームレート表示（?fps のときだけ。制作用。公開時はこの1行と、末尾の「フレームレート表示」節を外す） */
   #fps{ position:fixed; left:8px; top:calc(52px + env(safe-area-inset-top,0px)); z-index:30; font:11px/1.3 ui-monospace,Menlo,monospace; color:#fff; background:rgba(10,8,24,.72); border-radius:6px; padding:4px 7px; pointer-events:none; white-space:pre; }
+  /* 撮影中は UI を出さない（紙目と周辺減光は絵の一部なので残す） */
+  body.capturing #tag, body.capturing #hint, body.capturing #player, body.capturing #listBtn, body.capturing #dbg, body.capturing #fps, body.capturing .modalOverlay{ display:none !important; }
 </style>
 </head>
 <body>
@@ -143,7 +145,8 @@
 <p id="hint">ドラッグで回る／二本指で寄る／鳥に触れると鳴く</p>
 
 <div id="dbg">
-  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span></div>
+  <div class="row"><span id="camLabel" style="font:10px/1.3 ui-monospace,Menlo,monospace;white-space:pre;flex:1">-</span><button id="camCopy">画角をコピー</button><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -175,6 +178,12 @@ const MOTION = reduceMotion ? 0.25 : 1;
 const DEV = true;
 const ROOT = '../';                                   // リポジトリ直下への相対パス（公開版では ''）
 const PARAMS = new URLSearchParams(DEV ? location.search : '');
+/* 撮影モード（?capture、制作版のみ）：時間をコマ単位で進めて書き出す。乱数も種で固定して、毎回同じ絵にする */
+const CAPTURE = PARAMS.has('capture');
+if(CAPTURE){
+  let sd = (parseInt(PARAMS.get('seed')) || 1) >>> 0;
+  Math.random = ()=>{ sd |= 0; sd = sd + 0x6D2B79F5 | 0; let t = Math.imul(sd ^ sd >>> 15, 1 | sd); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0)/4294967296; };
+}
 
 /* ================================================================
    一日の時計
@@ -1128,10 +1137,20 @@ function midiToFreq(m){ return 440*Math.pow(2, (m-69)/12); }
 function clampNum(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
 function ensureAudioCtx(){
+  if(CAPTURE && !audioCtx) return null;   // 撮影中は実時間の音を鳴らさない（音は後でオフラインで書き出す）
   if(!audioCtx){
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if(!Ctx) return null;
-    audioCtx = new Ctx();
+    buildAudioGraph(new Ctx());
+  }
+  return audioCtx;
+}
+// 音の経路（masterGain → コンプレッサー → 出力、リバーブ）を ctx に組む。撮影の音の書き出しではオフラインの ctx で使う
+function buildAudioGraph(ctx){
+  {
+    audioCtx = ctx;
+    reverbConvolver = null; reverbWet = null; sfxGain = null;
+    for(const k in reverbSends) delete reverbSends[k];
     masterGain = audioCtx.createGain();
     masterGain.gain.value = muted ? 0 : volume;
     masterCompressor = audioCtx.createDynamicsCompressor();
@@ -1360,10 +1379,11 @@ function ensureSfx(){
 // 個体ごとの声の高さ：id から ±30 セントのずれ
 function voiceCents(id){ let h = 0; for(const c of (id||'')) h = (h*31 + c.charCodeAt(0))%997; return (h%61) - 30; }
 // さえずり：正弦波が音程へしゃくり上がる（style 0）か、上から降りる（style 1：応える側）
-function chirp(m, vol=1, style=0, cents=0){
+function chirp(m, vol=1, style=0, cents=0, at){
+  if(CAPTURE && !CAP.offline){ if(CAP.rec) CAP.chirps.push([CAP.time, m, vol, style, cents]); return; }
   const ctx = ensureAudioCtx(); if(!ctx || vol <= .01) return;
   ensureSfx();
-  const t = ctx.currentTime + .005, f = midiToFreq(m)*Math.pow(2, cents/1200), dur = .26;
+  const t = (at !== undefined ? at : ctx.currentTime) + .005, f = midiToFreq(m)*Math.pow(2, cents/1200), dur = .26;
   const out = ctx.createGain(); out.gain.value = vol; out.connect(sfxGain);
   const g = ctx.createGain();
   g.gain.setValueAtTime(.0001, t);
@@ -1771,7 +1791,7 @@ const orgel = (()=>{
     if(song.started){
       const a = lastPos, b = pos;
       for(const nt of notes){
-        const hit = b >= a ? (nt.t > a && nt.t <= b) : (nt.t > a || nt.t <= b);
+        const hit = b >= a ? (nt.t >= a && nt.t < b) : (nt.t >= a || nt.t < b);   // [a, b)：曲の頭（0 秒）の音も弾く。同じ音を二度弾かない
         if(hit){ const tt = teeth[nt.tooth]; tt.age = 0; tt.amp = .09*(.35 + .65*Math.sqrt(song.speed)); struck.push(nt.tooth); }
       }
       lastPos = pos;
@@ -2644,8 +2664,21 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
     snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
 refreshSpeedButtons();
+/* 今の画角（カメラの位置・注視点・縦の画角）を数値で出す。宣伝動画の設定（tools/promo/shots.json）にそのまま貼れる形 */
+function cameraSpec(){
+  const r = v=>+v.toFixed(3);
+  return { pos:[r(camera.position.x), r(camera.position.y), r(camera.position.z)], target:[r(LOOK.x), r(LOOK.y), r(LOOK.z)], fov:r(camera.fov) };
+}
+const camLabel = document.getElementById('camLabel');
+document.getElementById('camCopy').addEventListener('click', ()=>{
+  const txt = JSON.stringify(cameraSpec());
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ camLabel.textContent = 'コピーした\n' + txt; }, ()=>{ camLabel.textContent = txt; });
+  console.log('画角', txt);
+});
+let camLabelT = 0;
 function refreshDebug(){
   if(!dbg.classList.contains('on')) return;
+  if(performance.now() - camLabelT > 250){ camLabelT = performance.now(); const c = cameraSpec(); camLabel.textContent = `位置 ${c.pos.join(', ')}\n注視 ${c.target.join(', ')}\n画角 ${c.fov}°`; }
   const h = Math.floor(dayT*24), mnt = Math.floor((dayT*24 - h)*60);
   tLabel.textContent = `${curName} ${String(h).padStart(2,'0')}:${String(mnt).padStart(2,'0')}  月${(moonPhase*100).toFixed(0)}%`;
   if(document.activeElement !== tSlider) tSlider.value = Math.round(dayT*1000);
@@ -2816,14 +2849,93 @@ const fpsMeter = (()=>{
   };
 })();
 
+
+/* ================================================================
+   撮影モード（?capture、制作版のみ）：宣伝動画を1コマずつ書き出すための仕組み。
+   tools/promo/render.mjs が使う。手順と設定は tools/promo/README.md
+   ・時間は実時間でなく、1コマ = 1/fps 秒ずつ進める（重い環境でも動きと音がずれない）
+   ・曲は鳴らさず、曲の位置だけをコマに合わせて進める。音はあとでオフラインで同じ時間軸に書き出す
+   ・鳥の声は撮影中に起きた時刻を記録しておき、音の書き出しで同じ時刻に鳴らす
+================================================================ */
+const CAP = { cam:null, time:0, rec:false, chirps:[], offline:false, playing:false, pos0:0, daySpeed:0 };
+if(CAPTURE){
+  document.body.classList.add('capturing');
+  const V = a=>new THREE.Vector3(...a);
+  const ease = t=>t*t*(3 - 2*t);   // 端でゆっくり、中で速い
+  CAP.advance = dt=>{
+    CAP.time += dt;
+    if(CAP.daySpeed){ dayT += dt*CAP.daySpeed; if(dayT >= 1){ dayT -= 1; dayCount++; } }
+    if(CAP.playing){ song.pos = (song.pos + dt) % song.track.loopSec; }
+  };
+  window.__cap = {
+    ready:()=>birds.length > 0 && birds.every(b=>b.mode !== 'fly' && !b.loading),
+    // 撮る前の準備：時刻・曲・鳥を決め、warmup 秒だけ（曲を止めたまま）進めて落ち着かせる
+    setup:cfg=>{
+      timeSpeed = 0; dayT = cfg.dayT; CAP.daySpeed = cfg.daySeconds ? 1/cfg.daySeconds : 0;
+      const idx = Math.max(0, TRACKS.findIndex(t=>t.id === cfg.track));
+      currentTrackIdx = idx; song.track = TRACKS[idx]; orgel.setTrack(song.track);
+      song.pos = 0; song.speed = 1; song.started = false; isPlaying = false; CAP.playing = false;
+      CAP.cam = { pos:V(cfg.camA.pos), target:V(cfg.camA.target), fov:cfg.camA.fov };
+      const n = Math.round((cfg.warmup || 0)*cfg.fps);
+      for(let i=0;i<n;i++) stepFrame(1/cfg.fps, 0, true);   // 準備のコマは描かない（描画が溜まって遅くなる）
+      return { warmFrames:n };
+    },
+    // 撮影開始：曲を頭から（曲の位置 0）。ここからの時刻が動画の 0 秒
+    start:cfg=>{
+      CAP.time = 0; CAP.rec = true; CAP.chirps = [];
+      if(cfg.play){ song.pos = 0; song.started = true; isPlaying = true; CAP.playing = true; }
+      window.__cap.pose(cfg, 0); renderer.render(scene, camera);
+    },
+    pose:(cfg, t)=>{
+      const a = cfg.camA, b = cfg.camB || cfg.camA;
+      const k = cfg.move ? ease(Math.min(1, Math.max(0, (t - (cfg.move.start || 0))/cfg.move.seconds))) : 0;
+      CAP.cam.pos.copy(V(a.pos)).lerp(V(b.pos), k);
+      CAP.cam.target.copy(V(a.target)).lerp(V(b.target), k);
+      CAP.cam.fov = a.fov + (b.fov - a.fov)*k;
+    },
+    // 1コマ進める（frame 1 以降）
+    frame:(cfg, i)=>{ window.__cap.pose(cfg, i/cfg.fps); stepFrame(1/cfg.fps, 0); },
+    // 音の書き出し：同じ時間軸で曲（全パート）と鳥の声をオフラインで合成し、WAV（base64）を返す
+    renderAudio:async (cfg, seconds)=>{
+      const SR = 48000, tail = 2.5;
+      const off = new OfflineAudioContext(2, Math.ceil(SR*(seconds + tail)), SR);
+      CAP.offline = true; activeNodes = [];
+      buildAudioGraph(off); masterGain.gain.value = volume;
+      const tr = TRACKS.find(t=>t.id === cfg.track), insts = trackInstruments(tr);
+      for(const part of PARTS){
+        for(const [t, midi, dur, vel] of (tr[part] || [])){
+          for(let loop = 0; loop*tr.loopSec + t < seconds; loop++){
+            const at = loop*tr.loopSec + t;
+            (INSTRUMENTS[insts[part]] || INSTRUMENTS[DEFAULT_INSTRUMENTS[part]])(at, midi, dur, vel);
+          }
+        }
+      }
+      for(const [t, m, vol, style, cents] of CAP.chirps) if(t < seconds) chirp(m, vol, style, cents, t);
+      const buf = await off.startRendering();
+      CAP.offline = false;
+      // 16bit の WAV にする（尾の残響も含める）
+      const n = buf.length, ch = [buf.getChannelData(0), buf.getChannelData(1)];
+      const out = new DataView(new ArrayBuffer(44 + n*4));
+      const str = (o, x)=>{ for(let i=0;i<x.length;i++) out.setUint8(o + i, x.charCodeAt(i)); };
+      str(0,'RIFF'); out.setUint32(4, 36 + n*4, true); str(8,'WAVE'); str(12,'fmt '); out.setUint32(16, 16, true);
+      out.setUint16(20, 1, true); out.setUint16(22, 2, true); out.setUint32(24, SR, true); out.setUint32(28, SR*4, true);
+      out.setUint16(32, 4, true); out.setUint16(34, 16, true); str(36,'data'); out.setUint32(40, n*4, true);
+      for(let i=0, o=44; i<n; i++) for(let c=0;c<2;c++, o+=2){ const v = Math.max(-1, Math.min(1, ch[c][i])); out.setInt16(o, v < 0 ? v*0x8000 : v*0x7fff, true); }
+      const u8 = new Uint8Array(out.buffer); let bin = '';
+      for(let i=0;i<u8.length;i+=0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return { b64:btoa(bin), chirps:CAP.chirps.length };
+    },
+  };
+}
+
 /* ---------- ループ ---------- */
 let last = performance.now(), clock = 0, curtainTick = 0;
 const LOOK = new THREE.Vector3();
 applyTime(dayT);
 paintWindows(cur, litFrac(dayT), true);
-renderer.setAnimationLoop(now=>{
-  const dt = Math.min((now - last)/1000, .05);
-  last = now; clock += dt;
+function stepFrame(dt, now, noRender){
+  clock += dt;
+  if(CAPTURE) CAP.advance(dt);
 
   dayT += dt*timeSpeed/DAY_LEN;
   if(dayT >= 1){ dayT -= 1; dayCount++; }
@@ -2843,6 +2955,10 @@ renderer.setAnimationLoop(now=>{
   camera.position.y = THREE.MathUtils.clamp(camera.position.y, ROOM_FLOOR + .3, ROOM_CEIL - .3);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, .25, ROOM_D - .3);
   camera.lookAt(LOOK);
+  if(CAPTURE && CAP.cam){   // 撮影：画角を数値で直接与える
+    camera.position.copy(CAP.cam.pos); LOOK.copy(CAP.cam.target);
+    camera.fov = CAP.cam.fov; camera.updateProjectionMatrix(); camera.lookAt(LOOK);
+  }
 
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
@@ -2910,8 +3026,13 @@ renderer.setAnimationLoop(now=>{
   updateNotes(dt);
   if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
 
-  renderer.render(scene, camera);
+  if(!noRender) renderer.render(scene, camera);
   if(fpsMeter) fpsMeter(now);
+}
+if(!CAPTURE) renderer.setAnimationLoop(now=>{
+  const dt = Math.min((now - last)/1000, .05);
+  last = now;
+  stepFrame(dt, now);
 });
 </script>
 </body>

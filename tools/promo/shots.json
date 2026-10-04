@@ -1,0 +1,19 @@
+{
+  "_説明": "宣伝動画の設定。画角は制作版の ?debug の「画角をコピー」で出る形（pos・target・fov）をそのまま貼る。fov は縦の画角（度）",
+  "width": 1920, "height": 1080, "fps": 30, "seed": 7,
+  "birds": "shiro,momo,sora",
+  "shots": {
+    "A": {
+      "_説明": "画角1（オルゴールと鳥の寄り）から画角2（窓の外）へ6秒かけて引く。曲：はじまりのワルツ（音つき）",
+      "seconds": 6, "dayT": 0.62, "track": "hajimari00", "play": true, "audio": true, "warmup": 2,
+      "camA": { "pos": [0.05, 1.45, 0.75], "target": [0.1, 1.08, 0.05], "fov": 40 },
+      "camB": { "pos": [0, 2.287, 3.19], "target": [0, 1.62, 0.06], "fov": 52 },
+      "move": { "start": 0, "seconds": 6 }
+    },
+    "B": {
+      "_説明": "画角2に固定して、一日を10秒に早回し。昼から始めて、2〜3秒で夕方〜夜の窓明かりが灯る",
+      "seconds": 10, "dayT": 0.42, "daySeconds": 10, "track": "hajimari00", "play": true, "audio": false, "warmup": 2,
+      "camA": { "pos": [0, 2.287, 3.19], "target": [0, 1.62, 0.06], "fov": 52 }
+    }
+  }
+}

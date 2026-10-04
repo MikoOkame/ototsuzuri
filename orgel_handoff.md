@@ -27,6 +27,11 @@
 | `assets/ui/player_frame.png` | プレーヤーの外枠（ユーザーの手描き。後から入る）。描き方は §7 | 無ければ今の枠 |
 | `assets/box/` | ユーザーが作る箱の .glb（後から入る）。`orgel_umiwatari.fbx` は今のオルゴール（仮の箱＋機構、うみわたりのうた）を書き出したもの。Maya で箱を作るときの下敷き | FBX は書き出し物（§5） |
 
+### 宣伝動画（制作版のみ）
+- 手順・設定は `tools/promo/README.md`。`cd tools/promo && npm install && node render.mjs A`（B、または全部）で `tools/promo/out/` に 1920×1080・30fps・H.264 の mp4 を書き出す。オルゴールや箱を作り直したら、これを流し直すだけで同じ動画を撮り直せる。
+- 画角は `?debug` の「画角をコピー」（位置・注視点・縦の画角）で取り、`tools/promo/shots.json` に貼る。
+- 撮影モード（`?capture`）：実時間のループを止め、1コマ = 1/30 秒で進める。乱数は `seed` で固定。UI は隠す（紙目・周辺減光は残す）。音は同じ時間軸でオフライン合成し（曲の全パート＋撮影中に記録した鳥の声）、mp4 に合成する。ピンの当たり判定は [a, b) にした（曲の頭 0 秒の音も弾く）。
+
 ### 公開（完成版）
 - 公開版は リポジトリ直下の `index.html`。`node tools/build_public.mjs` が `src/orgel_dev.html` から作る（`DEV = false`、素材の場所 `ROOT = ''`）。公開版は URL 引数を読まないので、デバッグ表示・`?fps`・`?export`・確認用の引数・テスト用の覗き窓はすべて動かない。
 - 制作版 `src/orgel_dev.html` は今までどおり使える（`DEV = true`、`ROOT = '../'`）。
