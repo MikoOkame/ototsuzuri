@@ -96,6 +96,8 @@
   .modalCloseBtn{ margin-top:10px; width:100%; font-family:inherit; font-size:13px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:8px; cursor:pointer; }
   #hint{ bottom:calc(192px + env(safe-area-inset-bottom,0px)); }
   #dbg{ bottom:calc(186px + env(safe-area-inset-bottom,0px)); }
+  /* フレームレート表示（?fps のときだけ。制作用。公開時はこの1行と、末尾の「フレームレート表示」節を外す） */
+  #fps{ position:fixed; left:8px; top:calc(52px + env(safe-area-inset-top,0px)); z-index:30; font:11px/1.3 ui-monospace,Menlo,monospace; color:#fff; background:rgba(10,8,24,.72); border-radius:6px; padding:4px 7px; pointer-events:none; white-space:pre; }
 </style>
 </head>
 <body>
@@ -2537,6 +2539,20 @@ function resize(){
 window.addEventListener('resize', resize);
 resize();
 
+/* ---- フレームレート表示（?fps のときだけ。制作用。公開時はこの節と #fps の CSS を外す） ---- */
+const fpsMeter = (()=>{
+  if(!PARAMS.has('fps')) return null;
+  const el = document.createElement('div'); el.id = 'fps'; el.textContent = 'fps …'; document.body.appendChild(el);
+  let n = 0, t0 = performance.now(), worst = 0, prev = t0;
+  return now=>{
+    n++; worst = Math.max(worst, now - prev); prev = now;
+    if(now - t0 >= 1000){
+      el.textContent = `fps ${(n*1000/(now - t0)).toFixed(0)}  最長 ${worst.toFixed(0)}ms`;
+      n = 0; t0 = now; worst = 0;
+    }
+  };
+})();
+
 /* ---------- ループ ---------- */
 let last = performance.now(), clock = 0, curtainTick = 0;
 const LOOK = new THREE.Vector3();
@@ -2626,6 +2642,7 @@ renderer.setAnimationLoop(now=>{
   if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
 
   renderer.render(scene, camera);
+  if(fpsMeter) fpsMeter(now);
 });
 </script>
 </body>
