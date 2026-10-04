@@ -1034,22 +1034,24 @@ for(let k=0;k<7;k++){
   lf.rotation.set(Math.sin(a)*.5, 0, -Math.cos(a)*.5);
   scene.add(lf);
 }
-/* ボトルメール：まっすぐな円柱の組み合わせ（胴・肩・首）。透明感のある薄水色。中に巻いた手紙、口に薄い色のコルク */
+/* ボトルメール：まっすぐな円柱2つ（胴と首）。透明感のある薄水色。中に巻いた手紙、口に薄い色のコルク */
 const glassMat = inToon(0xbfe6ee, { transparent:true, opacity:.38, depthWrite:false });
-const BODY_R = .05, BODY_H = .17, SHOULDER_R = .034, SHOULDER_H = .025, NECK_R = .02, NECK_H = .045;
+const BODY_R = .05, BODY_H = .17, NECK_R = .02, NECK_H = .055;
 const bottle = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, BODY_H, 20), glassMat);
 bottle.position.set(BOTTLE_X, SILL_TOP + BODY_H/2, SMALL_Z); bottle.renderOrder = 2; scene.add(bottle); addOutline(bottle, .006, OUT_IN);
-const bshoulder = new THREE.Mesh(new THREE.CylinderGeometry(SHOULDER_R, SHOULDER_R, SHOULDER_H, 18), glassMat);
-bshoulder.position.set(BOTTLE_X, SILL_TOP + BODY_H + SHOULDER_H/2, SMALL_Z); bshoulder.renderOrder = 2; scene.add(bshoulder); addOutline(bshoulder, .005, OUT_IN);
 const bneck = new THREE.Mesh(new THREE.CylinderGeometry(NECK_R, NECK_R, NECK_H, 14), glassMat);
-bneck.position.set(BOTTLE_X, SILL_TOP + BODY_H + SHOULDER_H + NECK_H/2, SMALL_Z); bneck.renderOrder = 2; scene.add(bneck); addOutline(bneck, .004, OUT_IN);
-// 中の手紙：巻いた紙（生成り）に紐（赤茶）
-const letter = new THREE.Mesh(new THREE.CylinderGeometry(.016, .016, .12, 12), inToon(0xf3ead6));
-letter.rotation.z = .32; letter.position.set(BOTTLE_X, SILL_TOP + .075, SMALL_Z); scene.add(letter);
-const twine = new THREE.Mesh(new THREE.CylinderGeometry(.0175, .0175, .012, 12), inToon(0xa0584a));
-twine.rotation.z = .32; twine.position.copy(letter.position); scene.add(twine);
-const cork = new THREE.Mesh(new THREE.CylinderGeometry(.022, .022, .03, 12), inToon(0xe4cfa6));   // 今より薄い色のコルク
-cork.position.set(BOTTLE_X, SILL_TOP + BODY_H + SHOULDER_H + NECK_H + .01, SMALL_Z); scene.add(cork); addOutline(cork, .004, OUT_IN);
+bneck.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H/2, SMALL_Z); bneck.renderOrder = 2; scene.add(bneck); addOutline(bneck, .004, OUT_IN);
+// 中の手紙：巻いた紙（生成り）に紐（赤茶）。胴にはみ出さない大きさで斜めに入れ、底に当てる
+//   幅 = 長さ×sin傾き + 直径×cos傾き ≤ 胴の内径、高さ = 長さ×cos傾き + 直径×sin傾き ≤ 胴の内側の高さ
+const LT_R = .02, LT_L = .15, LT_TILT = .3;
+const ltH = LT_L*Math.cos(LT_TILT) + 2*LT_R*Math.sin(LT_TILT);
+const letter = new THREE.Mesh(new THREE.CylinderGeometry(LT_R, LT_R, LT_L, 14), inToon(0xf3ead6));
+letter.rotation.z = LT_TILT; letter.position.set(BOTTLE_X, SILL_TOP + .008 + ltH/2, SMALL_Z); scene.add(letter);
+const twine = new THREE.Mesh(new THREE.CylinderGeometry(LT_R + .0015, LT_R + .0015, .014, 14), inToon(0xa0584a));
+twine.rotation.z = LT_TILT; twine.position.copy(letter.position); scene.add(twine);
+// コルク：口より少し細く（首の内側に差し込む）。上が少し出る
+const cork = new THREE.Mesh(new THREE.CylinderGeometry(NECK_R*.82, NECK_R*.82, .032, 12), inToon(0xe4cfa6));
+cork.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H - .006, SMALL_Z); scene.add(cork); addOutline(cork, .003, OUT_IN);
 
 /* 外開きの窓 */
 const casMat = inToon(0xf5efe6);
