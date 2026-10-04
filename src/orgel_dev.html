@@ -1859,9 +1859,13 @@ const BIRD_BOOK = [
   { id:'kinako',  file:'tex_bird_07_kinako',  scale:1,    weight:1 },
   { id:'ame',     file:'tex_bird_08_ame',     scale:.92,  weight:1 },
   { id:'kurumi',  file:'tex_bird_09_kurumi',  scale:1.05, weight:1 },
-  { id:'hoshi',   file:'tex_bird_10_hoshi',   scale:1,    weight:1 },
-  { id:'tsuki',   file:'tex_bird_11_tsuki',   scale:1,    weight:1 },
+  { id:'hoshi',   file:'tex_bird_10_hoshi',   scale:1,    weight:1, glow:0xffc65a },   // 金色にうっすら光る
+  { id:'tsuki',   file:'tex_bird_11_tsuki',   scale:1,    weight:1, glow:0xbcd6ff },   // 青白くうっすら光る
 ];
+/* 体の発光（glow のある鳥だけ）。光源は使わず、体の色に足すだけ。
+   テクスチャの明るさに比例して光らせるので、暗い線（顔・羽の線）は光で飛ばない。
+   強さ = BASE ± PULSE（ゆっくり脈打つ）。PERIOD 秒で1周。 */
+const BIRD_GLOW = { BASE:.32, PULSE:.10, PERIOD:4.5 };
 const bookOf = id => BIRD_BOOK.find(e=>e.id === id);
 // 抽選：重み付きで1羽。exclude の id は選ばない（同じ鳥を同時に2羽出さない）
 function drawBird(exclude){
@@ -1909,7 +1913,7 @@ function makeBird(idx){
   // 音域：鳥ごとに1オクターブずつ分ける（触れて鳴らす音）
   const RANGES = [[72,84],[76,88],[81,93]];   // さえずりは高め。羽結びの 72〜93 を3羽で分ける
   const bird = { model, mixer, clips, body, neck, head, neckClip:new THREE.Quaternion(), headClip:new THREE.Quaternion(),
-    current:null, state:'', wait:0, idx, range:RANGES[idx % 3], id:'', cents:0, needDraw:true, loading:false,
+    current:null, state:'', wait:0, idx, range:RANGES[idx % 3], id:'', cents:0, needDraw:true, loading:false, glowPh:-1,
     yaw:0, pitch:0, tilt:0, tiltT:0, lookAt:null, lookT:0, singBeat:-1 };
   // 当たり判定：見た目より大きい球
   const hit = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 6), new THREE.MeshBasicMaterial({ visible:false }));
@@ -1934,7 +1938,11 @@ function assignBird(b){
   const e = fixed && !used.has(fixed) ? bookOf(fixed) : drawBird(used);
   b.loading = true; b.id = e.id;
   return birdTex(e.id).then(tex=>{
-    b.body.material.map = tex; b.body.material.needsUpdate = true;
+    b.body.material.map = tex;
+    if(e.glow){ b.body.material.emissive.setHex(e.glow); b.body.material.emissiveMap = tex; b.glowPh = Math.random()*Math.PI*2; }
+    else { b.body.material.emissive.setHex(0); b.body.material.emissiveMap = null; b.glowPh = -1; }
+    b.body.material.emissiveIntensity = e.glow ? BIRD_GLOW.BASE : 0;
+    b.body.material.needsUpdate = true;
     b.model.scale.setScalar(e.scale);
     b.cents = voiceCents(e.id); b.lastPitch = 0;
     b.loading = false; b.needDraw = false;
@@ -1944,7 +1952,7 @@ function assignBird(b){
 function retireBird(b){
   if(!b.id) return;
   const id = b.id; b.id = ''; b.needDraw = true;
-  b.body.material.map = null; b.body.material.needsUpdate = true;
+  b.body.material.map = null; b.body.material.emissiveMap = null; b.body.material.emissive.setHex(0); b.glowPh = -1; b.body.material.needsUpdate = true;
   releaseBirdTex(id);
 }
 /* ---- 首の向き（羽結び H節）----
@@ -2691,6 +2699,8 @@ renderer.setAnimationLoop(now=>{
   }
   orgel.update(dt);
   birdsUpdate(dt);
+  // 発光する鳥：明るさがゆっくり脈打つ（正弦波。点滅に見えないよう穏やかに）
+  for(const b of birds) if(b.glowPh >= 0) b.body.material.emissiveIntensity = BIRD_GLOW.BASE + BIRD_GLOW.PULSE*Math.sin(clock*Math.PI*2/BIRD_GLOW.PERIOD + b.glowPh);
   for(const b of birds){
     if(b.neck) b.neck.quaternion.copy(b.neckClip);
     if(b.head) b.head.quaternion.copy(b.headClip);

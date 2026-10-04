@@ -127,6 +127,7 @@
 ### 窓辺に来る鳥（確定。ランダム）
 - **対応表 `BIRD_BOOK`**（`src/orgel_dev.html`）：鳥の id → テクスチャのファイル名・大きさ・出やすさ（`weight`、抽選の重み）を1か所で持つ。将来、図鑑で好きな鳥に差し替えるときもこの表を使う。
 - **大きさ**（羽結びと同じ）：ame 0.92倍、kurumi 1.05倍、shirube 1.18倍、ほかは1倍。
+- **発光**（`BIRD_BOOK` の `glow`）：hoshi は金色（#ffc65a）、tsuki は青白（#bcd6ff）で、体そのものがうっすら光る。光の輪（ハロー）と、周りを照らす光源は使わない。発光の色にテクスチャを掛けて足すので、暗い線（顔・羽の線）は光で飛ばない。明るさは `BIRD_GLOW`（強さ BASE 0.32 ± PULSE 0.10、周期 PERIOD 4.5秒）の1か所で調整する。鳥ごとに位相をずらす。夜は暗い部屋の中で目立つので、強すぎたら BASE を下げる。
 - **新しい鳥の加え方**：①テクスチャを `assets/bird_mdl/texture/tex_bird_番号_id.png` に置く ②`BIRD_BOOK` に1行足す。これで出る。③軽くするなら `convert assets/bird_mdl/texture/tex_bird_番号_id.png -background white -alpha remove -resize 1024x1024 -quality 86 src/tex/tex_bird_番号_id.jpg` で軽量版を作る（作らなければ原本の PNG を読む）。
 - **定位置は3つ**：手すり左（x=-.42）・手すり右（x=.42）・窓台（x=.52、体は斜め45°。カーテンに掛からない位置）。どこに誰が来るかは抽選。
 - **入れ替わるタイミング**：
