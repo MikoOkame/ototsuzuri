@@ -278,6 +278,8 @@ function onOff(t, a, b, c, d){
 const lampsOn   = t => onOff(t, .63, .70, .05, .10);   // 街灯・灯台・ランタン・小舟
 const roomOn    = t => onOff(t, .58, .62, .79, .81);   // 室内の照明。家主は早寝
 const birdNight = t => onOff(t, .80, .83, .06, .09);   // 鳥が座って休む時間。完全に夜になってから朝まで
+const BIRD_SIT_T = .815;                                 // 座り始める時刻（birdNight が 0.5 を越える）
+const beforeSit = sec => BIRD_SIT_T - sec/DAY_LEN;      // 座り始める sec 秒前の時刻（一日の長さを変えても秒で保つ）
 function litFrac(t){                                   // 町の窓明かりの割合
   if(t < .04) return .12;
   if(t < .10) return .12*(1 - sstep(.04, .10, t));
@@ -2332,10 +2334,11 @@ async function loadBirds(){
   ]);
   birdSrc[BIRD_VARIANT] = glb;
   // 仮の3羽。モデルの正面は +z（rotation.y = 0 で部屋を向く）
-  // outside：窓の外（手すり）。夕方に帰り（leaveT）、夜明けに戻る（backT）。室内の鳥はずっと居る
+  // outside：窓の外（手すり）。夜、座り始める前に帰り（leaveT）、夜明けに戻る（backT）。室内の鳥はずっと居る
   const defs = [
-    { tex:'01_shiro', tx:tA, pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:.66, backT:.07 },
-    { tex:'03_momo',  tx:tB, pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:.70, backT:.095 },
+    // 外の鳥は、座って休み始める約10秒前に帰る（shiro が少し先、momo が後）
+    { tex:'01_shiro', tx:tA, pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:beforeSit(14), backT:.07 },
+    { tex:'03_momo',  tx:tB, pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:beforeSit(10), backT:.095 },
     { tex:'06_sora',  tx:tC, pos:[.52, SILL_TOP, .2],             rotY:-Math.PI/4,  outside:false },   // 体は斜め45°。カーテン（x≥.875）に掛からない位置
   ];
   defs.forEach((d, i)=>{
@@ -2439,7 +2442,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
-    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]) };
+    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT };
 }
 refreshSpeedButtons();
 function refreshDebug(){
