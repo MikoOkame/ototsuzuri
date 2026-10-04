@@ -289,9 +289,12 @@ function onOff(t, a, b, c, d){
 }
 const lampsOn   = t => onOff(t, .63, .70, .05, .10);   // 街灯・灯台・ランタン・小舟
 const roomOn    = t => onOff(t, .58, .62, .79, .81);   // 室内の照明。家主は早寝
-const birdNight = t => onOff(t, .80, .83, .06, .09);   // 鳥が座って休む時間。完全に夜になってから朝まで
+// 鳥が座って休む時間：完全に夜になってから（0.80〜0.83）、空が白み始めて明るくなってきた頃（0.955〜0.975）まで
+const BIRD_WAKE_T = .965;                                 // 起きる時刻（birdNight が 0.5 を下回る）
+const birdNight = t => onOff(t, .80, .83, BIRD_WAKE_T - .01, BIRD_WAKE_T + .01);
 const BIRD_SIT_T = .815;                                 // 座り始める時刻（birdNight が 0.5 を越える）
 const beforeSit = sec => BIRD_SIT_T - sec/DAY_LEN;      // 座り始める sec 秒前の時刻（一日の長さを変えても秒で保つ）
+const afterWake = sec => (BIRD_WAKE_T + sec/DAY_LEN) % 1; // 起きてから sec 秒後の時刻
 function litFrac(t){                                   // 町の窓明かりの割合
   if(t < .04) return .12;
   if(t < .10) return .12*(1 - sstep(.04, .10, t));
@@ -2121,7 +2124,11 @@ function barSecOf(track){
 function wantPresent(b, t){
   if(!firstPlayDone) return false;
   if(!b.outside) return true;
-  return t >= b.backT && t < b.leaveT;
+  return inOutsideHours(b, t);
+}
+// 外の鳥が居る時間。戻る時刻が真夜中をまたぐ（backT > leaveT）ときは、backT から翌日の leaveT まで
+function inOutsideHours(b, t){
+  return b.backT < b.leaveT ? (t >= b.backT && t < b.leaveT) : (t >= b.backT || t < b.leaveT);
 }
 const isDay = ()=>birdNight(dayT) <= .5;
 const singingBirds = ()=>birds.filter(b=>b.singing);
@@ -2482,8 +2489,8 @@ async function loadBirds(){
   // outside：窓の外（手すり）。夜、座り始める前に帰り（leaveT）、夜明けに戻る（backT）。室内の鳥はずっと居る
   const defs = [
     // 外の鳥は、座って休み始める約10秒前に帰る（手すり左が少し先、右が後）。夜明けに抽選し直した鳥が戻る
-    { pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:beforeSit(14), backT:.07 },
-    { pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:beforeSit(10), backT:.095 },
+    { pos:[-.42, RAIL_TOP + .035, RAIL_Z], rotY:.3,          outside:true,  leaveT:beforeSit(14), backT:afterWake(8) },
+    { pos:[.42, RAIL_TOP + .035, RAIL_Z],  rotY:-.3,         outside:true,  leaveT:beforeSit(10), backT:afterWake(20) },
     { pos:[.52, SILL_TOP, .2],             rotY:-Math.PI/4,  outside:false },   // 窓台：ずっと居る。体は斜め45°。カーテン（x≥.875）に掛からない位置
   ];
   defs.forEach((d, i)=>{
@@ -2496,7 +2503,7 @@ async function loadBirds(){
     b.model.visible = false;
   });
   // 最初に開いたときに、その時刻に居る鳥の顔ぶれを抽選してテクスチャを読む（夜は窓台の1羽だけ）
-  await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && (dayT >= b.backT && dayT < b.leaveT)).map(assignBird));
+  await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && inOutsideHours(b, dayT)).map(assignBird));
   // ?birds：最初から定位置に居る（確認用）
   for(const b of birds) if(firstPlayDone && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.home.pos).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
