@@ -2072,8 +2072,18 @@ function beginLeave(b){
 const _fp = new THREE.Vector3(), _fq = new THREE.Vector3();
 function updateFlight(b, dt){
   const f = b.fl; f.t += dt;
-  if(f.dir < 0 && f.t < .45){ return; }            // 帰り：飛び立つ前のため
-  const s = THREE.MathUtils.clamp((f.t - (f.dir < 0 ? .45 : 0))/FLY_SEC, 0, 1);
+  const TURN = .6;                                   // 帰り：その場で進む向きへ振り向いてから飛び立つ
+  if(f.dir < 0 && f.t < TURN){
+    if(f.yaw0 === undefined){
+      bez(_fp, f.path[0], f.path[1], f.path[2], f.path[3], .97);
+      f.yaw0 = b.model.rotation.y;
+      f.yaw1 = Math.atan2(_fp.x - f.path[3].x, _fp.z - f.path[3].z);
+    }
+    const d = Math.atan2(Math.sin(f.yaw1 - f.yaw0), Math.cos(f.yaw1 - f.yaw0));
+    b.model.rotation.y = f.yaw0 + d*sstep(0, 1, f.t/TURN);
+    return;
+  }
+  const s = THREE.MathUtils.clamp((f.t - (f.dir < 0 ? TURN : 0))/FLY_SEC, 0, 1);
   const e = f.dir > 0 ? 1 - Math.pow(1 - s, 2.2) : s*s;   // 来るときは減速して降り、帰るときは加速して去る
   const u = f.dir > 0 ? e : 1 - e;
   const P = f.path;
@@ -2081,12 +2091,12 @@ function updateFlight(b, dt){
   bez(_fq, P[0], P[1], P[2], P[3], Math.min(1, u + .01*f.dir) );
   b.model.position.copy(_fp);
   // 進む向きを向く。着地の手前で定位置の向きへ戻す
-  const dx = (_fq.x - _fp.x)*f.dir, dz = (_fq.z - _fp.z)*f.dir;
+  const dx = _fq.x - _fp.x, dz = _fq.z - _fp.z;   // _fq はすでに進む先の点（帰りは u−0.01）。dir を掛けると逆向きになる
   let yaw = Math.abs(dx) + Math.abs(dz) > 1e-6 ? Math.atan2(dx, dz) : b.home.rotY;
-  const settle = f.dir > 0 ? sstep(.75, 1, s) : 1 - sstep(0, .2, s);
+  const settle = f.dir > 0 ? sstep(.75, 1, s) : 0;   // 来るときだけ、着地の手前で定位置の向きへ戻す
   const dy = Math.atan2(Math.sin(b.home.rotY - yaw), Math.cos(b.home.rotY - yaw));
   b.model.rotation.y = yaw + dy*settle;
-  if(f.dir < 0 && !f.took && f.t > .9){ f.took = true; setAnim(b, 'flying', true, .3, true); }
+  if(f.dir < 0 && !f.took && f.t > TURN + .45){ f.took = true; setAnim(b, 'flying', true, .3, true); }
   if(f.dir > 0 && !f.landed && s > .72){ f.landed = true; setAnim(b, 'landing', false, .3, true); }
   if(s >= 1){
     if(f.dir > 0){ b.model.position.copy(b.home.pos); b.model.rotation.y = b.home.rotY; enterPerch(b); }
@@ -2427,7 +2437,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
-    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, arrive:i=>beginArrive(birds[i]) };
+    snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]) };
 }
 refreshSpeedButtons();
 function refreshDebug(){
