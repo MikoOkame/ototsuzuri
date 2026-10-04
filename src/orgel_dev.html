@@ -53,6 +53,7 @@
   }
   #dbg button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
   #dbg #tLabel{ min-width:9em; }
+  #dbg #camLabel{ flex:1; font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre; user-select:text; -webkit-user-select:text; }
   /* 再生の操作（v10 の構成。鍵盤はない）
      アイコンと外枠はユーザーの手描きに差し替える前提。
      アイコン：ICONS（script 内）に画像を入れるとボタンの文字の代わりに表示される。
@@ -145,8 +146,8 @@
 <p id="hint">ドラッグで回る／二本指で寄る／鳥に触れると鳴く</p>
 
 <div id="dbg">
-  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span></div>
-  <div class="row"><span id="camLabel" style="font:10px/1.3 ui-monospace,Menlo,monospace;white-space:pre;flex:1">-</span><button id="camCopy">画角をコピー</button><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="camLabel">-</span><button id="camCopy">画角をコピー</button></div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
