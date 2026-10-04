@@ -11,6 +11,7 @@
 
 ## 編集の規則
 - 編集するのは `src/orgel_dev.html` だけ。`ref/` と `assets/` の中は書き換えない。
+- 公開版 `index.html` は `node tools/build_public.mjs` で `src/orgel_dev.html` から作る。手で編集しない。制作版を直したら作り直して一緒にコミットする。
 - three.js は 0.160 に統一する。
 - 仕様は `orgel_handoff.md` に従う。仕様を変えたら引き継ぎ書も更新する。
 - 段階の区切りでは、iPhone 縦画面相当のスクリーンショットを撮って確認してから報告する。描画を目視していないものを「できた」と言わない。

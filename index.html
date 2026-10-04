@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- 公開版。tools/build_public.mjs が src/orgel_dev.html から作る。直接は編集しない -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -143,7 +144,7 @@
 <p id="hint">ドラッグで回る／二本指で寄る／鳥に触れると鳴く</p>
 
 <div id="dbg">
-  <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="tLabel">-</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -172,8 +173,8 @@ const MOTION = reduceMotion ? 0.25 : 1;
 /* 制作版と公開版の切り替え。公開版（リポジトリ直下の index.html）は tools/build_public.mjs が
    このファイルから作り、DEV を false・素材の場所を書き換える。公開版では URL 引数を読まないので、
    デバッグ表示・?fps・?export・確認用の引数・テスト用の覗き窓はすべて動かない */
-const DEV = true;
-const ROOT = '../';                                   // リポジトリ直下への相対パス（公開版では ''）
+const DEV = false;
+const ROOT = '';                                   // リポジトリ直下への相対パス（公開版では ''）
 const PARAMS = new URLSearchParams(DEV ? location.search : '');
 
 /* ================================================================
