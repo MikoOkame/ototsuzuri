@@ -190,7 +190,7 @@ const sstep = (a, b, x) => { const t = clamp01((x - a)/(b - a)); return t*t*(3 -
 /* ---------- レンダラ ---------- */
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
-const DPR = Math.min(window.devicePixelRatio || 1, 2);
+const DPR = Math.min(window.devicePixelRatio || 1, 1.5);   // 画素密度の上限（羽結びと同じ）
 renderer.setPixelRatio(DPR);
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x34325f, 40, 420);
@@ -603,12 +603,14 @@ const seaMat = new THREE.ShaderMaterial({
   uniforms:{ uT:{value:0}, uDeep:{value:new THREE.Vector3()}, uLight:{value:new THREE.Vector3()},
              uFog:{value:new THREE.Vector3()}, uNear:{value:50}, uFar:{value:470},
              uSun:{value:sunDir}, uGlow:{value:new THREE.Vector3()}, uSunUp:{value:0}, uSunLow:{value:0},
-             uMoon:{value:moonDir}, uMoonCol:{value:new THREE.Vector3(.85,.87,1)}, uMoonUp:{value:0},
-             uCalm:{value:PARAMS.has('calm') ? parseFloat(PARAMS.get('calm')) : 1} },
+             uMoon:{value:moonDir}, uMoonCol:{value:new THREE.Vector3(.85,.87,1)}, uMoonUp:{value:0} },
   vertexShader:`varying vec3 vW;
     void main(){ vW=(modelMatrix*vec4(position,1.)).xyz; gl_Position=projectionMatrix*viewMatrix*vec4(vW,1.); }`,
+  // 窓から見下ろす静かな海だけを描く。羽結びの海から、この距離では見えない計算を外してある：
+  //   近景の細波・近景の波頭・きらめき（静かな海では描いていなかった）、中くらいの模様（5段のノイズ。効きが1割で見えない）。
+  //   残したもの：大きな濃淡、細かい波の場（r1/r2）、うねりの法線、照り返し、霧。
   fragmentShader:`precision highp float; varying vec3 vW;
-    uniform float uT,uNear,uFar,uSunUp,uSunLow,uMoonUp,uCalm; uniform vec3 uDeep,uLight,uFog,uSun,uGlow,uMoon,uMoonCol;
+    uniform float uT,uNear,uFar,uSunUp,uSunLow,uMoonUp; uniform vec3 uDeep,uLight,uFog,uSun,uGlow,uMoon,uMoonCol;
     ${GLSL_NOISE}
     vec3 waves(vec2 p, float t){
       vec2 D[4]; D[0]=vec2(.8,.6); D[1]=vec2(-.5,.87); D[2]=vec2(.2,-.98); D[3]=vec2(-.9,-.3);
@@ -628,38 +630,20 @@ const seaMat = new THREE.ShaderMaterial({
       float t=uT*2.2;
       float near=1.-smoothstep(25.,110.,dist);
 
+      // 大きな濃淡：歪ませた座標で水彩のむらにする
       vec2 q=p+8.*vec2(fbm3(p*.02+vec2(t*.05,0.)), fbm3(p*.02+vec2(0.,-t*.04)));
       float big=fbm3(q*.005+vec2(t*.012,0.));
-      float mid=fbm(q*.022+vec2(t*.02,t*.03));
-      // 静かな海では濃淡の境を広くとって、斑でなく緩い濃淡にする
       vec3 col=mix(uDeep,uLight,smoothstep(.3,.72,big));
-      // 中くらいの模様（顔料の溜まり・明るい斑）。見下ろすと汚れに見えるので静かな海では消す
-      float midK=1.-uCalm*.9;
-      float edge=1.-smoothstep(0.,.035,abs(mid-.52));
-      col=mix(col,uDeep*.88,edge*.3*midK);
-      col=mix(col,uLight*1.03,smoothstep(.55,.75,mid)*.3*midK);
+      // 細かい波の場（交差する2方向）。見えている「波」はこれとうねりの法線
       float r1=fbm3(vec2(q.x*.07,q.y*.24)+vec2(t*.35,t*.12));
       float r2=fbm3(vec2(q.x*.22,q.y*.08)+vec2(-t*.22,t*.3));
-      float fine=1.-uCalm*.7;
-      col+=(smoothstep(.6,.76,r1)*.05 + smoothstep(.62,.78,r2)*.035)*fine;
-      col-=smoothstep(.6,.3,r1*r2*2.)*.02*fine;
+      col+=(smoothstep(.6,.76,r1)*.05 + smoothstep(.62,.78,r2)*.035)*.3;
+      col-=smoothstep(.6,.3,r1*r2*2.)*.006;
 
+      // うねり：風の強いところだけ法線を立てる
       vec3 w=waves(mix(p,q,.7),uT);
       float gust=mix(.3,1.35,smoothstep(.28,.72,fbm3(q*.011+vec2(-t*.03,t*.02))));
-      vec2 gsum=w.xy*1.6*gust*.8*(1.-uCalm*.75);
-      vec2 cg=vec2(0.);
-      if(near>0. && uCalm<.99){
-        vec2 E[3]; E[0]=vec2(.94,.34); E[1]=vec2(-.6,.8); E[2]=vec2(.1,-1.);
-        float G[3]; G[0]=3.1; G[1]=5.3; G[2]=8.7;
-        for(int i=0;i<3;i++){
-          float ph=dot(p,E[i])*G[i] + uT*1.6*sqrt(9.8*G[i]);
-          cg+=.03*cos(ph)*E[i];
-        }
-        vec2 e=vec2(.35,0.), o=vec2(uT*.9,uT*.6);
-        float nn=fbm3(p*1.1+o);
-        cg+=vec2(fbm3(p*1.1+e+o)-nn, fbm3(p*1.1+e.yx+o)-nn)*.3;
-        gsum+=cg*near*mix(.6,1.1,gust)*(1.-uCalm);
-      }
+      vec2 gsum=w.xy*1.6*gust*.8*.25;
       vec3 n=normalize(vec3(-gsum.x,1.,-gsum.y));
       vec3 v=normalize(vW-cameraPosition);
       vec3 r=reflect(v,n);
@@ -671,23 +655,10 @@ const seaMat = new THREE.ShaderMaterial({
       col+=lit*vec3(.9,.8,.6)*(.08+near*.22)*uSunUp;
       col=mix(col,uFog*1.02,fr*.3);
       col=mix(col,uDeep*.92,(1.-fr)*near*.18);
-      if(near>0.){
-        float crest=smoothstep(.62,.7,fbm3(vec2(p.x*.9,p.y*.45)+cg*2.+vec2(uT*.7,uT*.3)));
-        col=mix(col,uLight*1.08,crest*near*.35*(1.-uCalm));   // 近景の波頭。静かな海では描かない（白い斑に見えた）
-      }
       // 照り返し：太陽が低いほど強く、温かく。月は弱く
-      float sheen=pow(s,mix(10.,5.,uSunLow)*(1.-uCalm*.5))*mix(.22,.7,uSunLow)*uSunUp*(1.-uCalm*.35);
+      float sheen=pow(s,mix(5.,2.5,uSunLow))*mix(.22,.7,uSunLow)*uSunUp*.65;
       col=mix(col,uGlow*1.05,sheen);
       col=mix(col,uMoonCol,pow(sm,16.)*.28*uMoonUp);
-      // きらめき：点に砕けた鋭いハイライト
-      if(dist<500. && uCalm<.99){
-        float cell=hash(floor(q*1.3));
-        float blink=.5+.5*sin(t*(3.+cell*5.)+cell*40.);
-        float dots=smoothstep(.74,.95,noise(q*1.3+vec2(t*.6,t*.4)))*blink*mix(.55,1.1,gust);
-        float sp=pow(s,110.)*dots*(2.6+2.*uSunLow)*uSunUp + pow(sm,110.)*dots*1.6*uMoonUp;
-        sp*=(1.-smoothstep(200.,500.,dist))*(1.-uCalm);
-        col=mix(col,vec3(1.,.97,.9),min(sp,1.)*.85);
-      }
       col=mix(col,uFog,smoothstep(uNear,uFar,dist));
       gl_FragColor=vec4(col,1.);
     }`
@@ -2547,7 +2518,7 @@ const fpsMeter = (()=>{
   return now=>{
     n++; worst = Math.max(worst, now - prev); prev = now;
     if(now - t0 >= 1000){
-      el.textContent = `fps ${(n*1000/(now - t0)).toFixed(0)}  最長 ${worst.toFixed(0)}ms`;
+      el.textContent = `fps ${(n*1000/(now - t0)).toFixed(0)}  平均 ${((now - t0)/n).toFixed(1)}ms  最長 ${worst.toFixed(0)}ms`;
       n = 0; t0 = now; worst = 0;
     }
   };
