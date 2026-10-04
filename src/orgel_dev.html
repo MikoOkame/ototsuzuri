@@ -950,6 +950,33 @@ scene.add(wall);
 box(12, 3.55, .04, inToon(0xb9a3b6), 0, -1.25, .02);
 box(12, .06, .07, inToon(0xf3ece4), 0, .52, .04, scene, .012);
 
+/* 部屋の箱：床・左右の壁・奥の壁・天井。カメラをどこへ回しても外が抜けて見えないように囲う。
+   窓の壁（z=0）から奥へ ROOM_D、左右は ±ROOM_W/2。家具はまだ置かない */
+const ROOM_W = 9, ROOM_D = 5.4, ROOM_FLOOR = 0, ROOM_CEIL = 4.1;
+{
+  const wallM = inToon(0xe8dac6), wainM = inToon(0xb9a3b6), railM = inToon(0xf3ece4), floorM = inToon(0x8a6a58), ceilM = inToon(0xe2d6c4);
+  const hx = ROOM_W/2, cz = ROOM_D/2, H = ROOM_CEIL - ROOM_FLOOR, WT = .1;
+  box(ROOM_W + .2, .1, ROOM_D + .2, floorM, 0, ROOM_FLOOR - .05, cz);                      // 床
+  box(ROOM_W + .2, .1, ROOM_D + .2, ceilM, 0, ROOM_CEIL + .05, cz);                        // 天井
+  [-1, 1].forEach(sg=>{                                                                    // 左右の壁
+    box(WT, H, ROOM_D, wallM, sg*(hx + WT/2), ROOM_FLOOR + H/2, cz);
+    box(.04, .52 - ROOM_FLOOR, ROOM_D, wainM, sg*(hx - .02), (ROOM_FLOOR + .52)/2, cz);       // 腰板
+    box(.07, .06, ROOM_D, railM, sg*(hx - .035), .52, cz, scene, .012);                      // 見切り
+    box(.05, H, .05, wallM, sg*(hx - .025), ROOM_FLOOR + H/2, .025, scene, .012);            // 窓の壁との角
+    box(.05, H, .05, wallM, sg*(hx - .025), ROOM_FLOOR + H/2, ROOM_D - .025, scene, .012);   // 奥の壁との角
+  });
+  box(ROOM_W, H, WT, wallM, 0, ROOM_FLOOR + H/2, ROOM_D + WT/2);                            // 奥の壁
+  box(ROOM_W, .52 - ROOM_FLOOR, .04, wainM, 0, (ROOM_FLOOR + .52)/2, ROOM_D - .02);
+  box(ROOM_W, .06, .07, railM, 0, .52, ROOM_D - .035, scene, .012);
+  // 床と壁の境、天井と壁の境に線を入れて、部屋の形を読ませる
+  box(ROOM_W, .03, .03, railM, 0, ROOM_FLOOR + .015, .035, scene, .01);
+  box(ROOM_W, .03, .03, railM, 0, ROOM_FLOOR + .015, ROOM_D - .05, scene, .01);
+  [-1, 1].forEach(sg=>box(.03, .03, ROOM_D, railM, sg*(hx - .05), ROOM_FLOOR + .015, cz, scene, .01));
+  box(ROOM_W, .08, .06, railM, 0, ROOM_CEIL - .04, .05, scene, .01);
+  box(ROOM_W, .08, .06, railM, 0, ROOM_CEIL - .04, ROOM_D - .05, scene, .01);
+  [-1, 1].forEach(sg=>box(.06, .08, ROOM_D, railM, sg*(hx - .05), ROOM_CEIL - .04, cz, scene, .01));
+}
+
 /* 窓枠（室内側の額縁） */
 const trim = inToon(0xf5efe6);
 box(WIN_R - WIN_L + .26, .13, .06, trim, 0, WIN_T + .065, .03, scene, .012);
@@ -2663,6 +2690,10 @@ renderer.setAnimationLoop(now=>{
     LOOK.x + Math.sin(ORBIT.cAz)*Math.cos(ORBIT.cEl)*ORBIT.cDist,
     LOOK.y + Math.sin(ORBIT.cEl)*ORBIT.cDist,
     LOOK.z + Math.cos(ORBIT.cAz)*Math.cos(ORBIT.cEl)*ORBIT.cDist);
+  // カメラは部屋の中に留める（壁・床・天井を抜けて外が見えないように）
+  camera.position.x = THREE.MathUtils.clamp(camera.position.x, -ROOM_W/2 + .3, ROOM_W/2 - .3);
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y, ROOM_FLOOR + .3, ROOM_CEIL - .3);
+  camera.position.z = THREE.MathUtils.clamp(camera.position.z, .25, ROOM_D - .3);
   camera.lookAt(LOOK);
 
   sky.position.copy(camera.position);
