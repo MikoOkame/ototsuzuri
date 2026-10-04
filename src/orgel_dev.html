@@ -1727,14 +1727,16 @@ const orgel = (()=>{
 /* ---------- ベランダ ---------- */
 const iron = toon(0x3e3552);
 const RAIL_Z = -1.65, RAIL_TOP = 1.15, BAL_Y = .2;
-box(3.6, .12, 1.45, toon(0x9e8ea6), 0, BAL_Y - .06, -1.0);
+box(3.6, .12, 1.45, toon(0x9e8ea6), 0, BAL_Y - .06, -1.0, scene, .012, OUT_EX);   // 床の板（柵と同じ輪郭線）
 box(3.5, .07, .09, iron, 0, RAIL_TOP, RAIL_Z, scene, .012, OUT_EX);
 box(3.5, .05, .06, iron, 0, BAL_Y + .12, RAIL_Z);
 const BAL_STEP = 3.44/24;                 // 縦の桟の間隔（正面・側面とも）
 const WALL_FACE_Z = -.3;                   // 外壁の面
+// 縦の桟は下の横木から手すりまで（横木で止める。床からは浮かせない）
+const BAR_Y0 = BAL_Y + .12, BAR_H = RAIL_TOP - BAR_Y0, BAR_YC = BAR_Y0 + BAR_H/2;
 for(let k=0;k<=24;k++){
   const x = -1.72 + k*BAL_STEP;
-  box(.022, RAIL_TOP - BAL_Y - .1, .022, iron, x, (RAIL_TOP + BAL_Y)/2, RAIL_Z);
+  box(.022, BAR_H, .022, iron, x, BAR_YC, RAIL_Z);
 }
 [-1, 1].forEach(s=>{
   const sx = s*1.75;
@@ -1744,8 +1746,10 @@ for(let k=0;k<=24;k++){
   const zA = RAIL_Z, zB = WALL_FACE_Z;
   box(.06, .05, zB - zA, iron, sx, BAL_Y + .12, (zA + zB)/2);
   // 側面の縦の桟：正面と同じ間隔・太さ。角の支柱の隣から壁の手前まで
-  for(let z = zA + BAL_STEP; z < zB - BAL_STEP*.4; z += BAL_STEP){
-    box(.022, RAIL_TOP - BAL_Y - .1, .022, iron, sx, (RAIL_TOP + BAL_Y)/2, z);
+  // 壁付けの支柱：側面の手すりと下の横木が壁に当たるところ（角の支柱と同じ太さ・色）
+  box(.06, RAIL_TOP - BAL_Y, .06, iron, sx, (RAIL_TOP + BAL_Y)/2, zB - .03);
+  for(let z = zA + BAL_STEP; z < zB - BAL_STEP*.6; z += BAL_STEP){
+    box(.022, BAR_H, .022, iron, sx, BAR_YC, z);
   }
 });
 const planter = toon(0x9a7a66);
@@ -1781,6 +1785,9 @@ const BOX_Z = RAIL_Z - RAIL_HALF_D - HOOK_T - BOX_D/2;               // 手す�
     scene.add(lf);
   }
 });
+// ランタン：右の角の支柱を上に伸ばし、その先端に載せる（灯りの位置は手すりの上 20cm のまま）
+box(.045, .10, .045, iron, 1.75, RAIL_TOP + .05, RAIL_Z, scene, .008, OUT_EX);                 // 伸ばした支柱（手すりの上 0〜10cm）
+box(.13, .02, .13, iron, 1.75, RAIL_TOP + .11, RAIL_Z, scene, .008, OUT_EX);                   // 受け皿（上面がランタンの底 = 手すりの上 12cm）
 const lanternBox = box(.11, .16, .11, new THREE.MeshBasicMaterial({ color:0xffdca0 }), 1.75, RAIL_TOP + .2, RAIL_Z, scene, .012, OUT_EX);
 box(.14, .03, .14, iron, 1.75, RAIL_TOP + .295, RAIL_Z);
 const lanternGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex, color:0xffcf88, transparent:true,
