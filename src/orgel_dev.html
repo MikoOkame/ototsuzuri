@@ -2871,7 +2871,7 @@ if(CAPTURE){
     ready:()=>birds.length > 0 && birds.every(b=>b.mode !== 'fly' && !b.loading),
     // 撮る前の準備：時刻・曲・鳥を決め、warmup 秒だけ（曲を止めたまま）進めて落ち着かせる
     setup:cfg=>{
-      timeSpeed = 0; dayT = cfg.dayT; CAP.daySpeed = cfg.daySeconds ? 1/cfg.daySeconds : 0;
+      timeSpeed = 0; dayT = cfg.dayT; CAP.daySpeed = 0;   // 準備の間は時刻を止める（撮影の 0 秒が cfg.dayT になるように）
       const idx = Math.max(0, TRACKS.findIndex(t=>t.id === cfg.track));
       currentTrackIdx = idx; song.track = TRACKS[idx]; orgel.setTrack(song.track);
       song.pos = 0; song.speed = 1; song.started = false; isPlaying = false; CAP.playing = false;
@@ -2882,7 +2882,7 @@ if(CAPTURE){
     },
     // 撮影開始：曲を頭から（曲の位置 0）。ここからの時刻が動画の 0 秒
     start:cfg=>{
-      CAP.time = 0; CAP.rec = true; CAP.chirps = [];
+      CAP.time = 0; CAP.rec = true; CAP.chirps = []; CAP.daySpeed = cfg.daySeconds ? 1/cfg.daySeconds : 0;
       if(cfg.play){ song.pos = 0; song.started = true; isPlaying = true; CAP.playing = true; }
       window.__cap.pose(cfg, 0); renderer.render(scene, camera);
     },
