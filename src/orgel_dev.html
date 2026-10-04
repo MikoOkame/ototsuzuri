@@ -1730,13 +1730,23 @@ const RAIL_Z = -1.65, RAIL_TOP = 1.15, BAL_Y = .2;
 box(3.6, .12, 1.45, toon(0x9e8ea6), 0, BAL_Y - .06, -1.0);
 box(3.5, .07, .09, iron, 0, RAIL_TOP, RAIL_Z, scene, .012, OUT_EX);
 box(3.5, .05, .06, iron, 0, BAL_Y + .12, RAIL_Z);
+const BAL_STEP = 3.44/24;                 // 縦の桟の間隔（正面・側面とも）
+const WALL_FACE_Z = -.3;                   // 外壁の面
 for(let k=0;k<=24;k++){
-  const x = -1.72 + k*(3.44/24);
+  const x = -1.72 + k*BAL_STEP;
   box(.022, RAIL_TOP - BAL_Y - .1, .022, iron, x, (RAIL_TOP + BAL_Y)/2, RAIL_Z);
 }
 [-1, 1].forEach(s=>{
-  box(.07, .07, 1.4, iron, s*1.75, RAIL_TOP, -.95, scene, .012, OUT_EX);
-  box(.06, RAIL_TOP - BAL_Y, .06, iron, s*1.75, (RAIL_TOP + BAL_Y)/2, RAIL_Z);
+  const sx = s*1.75;
+  box(.07, .07, 1.4, iron, sx, RAIL_TOP, -.95, scene, .012, OUT_EX);                // 側面の手すり（壁まで）
+  box(.06, RAIL_TOP - BAL_Y, .06, iron, sx, (RAIL_TOP + BAL_Y)/2, RAIL_Z);          // 角の支柱：正面と側面の両方の桟と横木を受ける
+  // 側面の下の横木：角の支柱から壁まで（正面と同じ高さ・太さ）
+  const zA = RAIL_Z, zB = WALL_FACE_Z;
+  box(.06, .05, zB - zA, iron, sx, BAL_Y + .12, (zA + zB)/2);
+  // 側面の縦の桟：正面と同じ間隔・太さ。角の支柱の隣から壁の手前まで
+  for(let z = zA + BAL_STEP; z < zB - BAL_STEP*.4; z += BAL_STEP){
+    box(.022, RAIL_TOP - BAL_Y - .1, .022, iron, sx, (RAIL_TOP + BAL_Y)/2, z);
+  }
 });
 const planter = toon(0x9a7a66);
 const petals = [0xf4b6c4, 0xffffff, 0xf9d3a0, 0xd9c2f0];
