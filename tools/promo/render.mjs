@@ -31,6 +31,10 @@ const browser = await chromium.launch({ executablePath: CHROME,
 for (const name of names) {
   const shot = cfgAll.shots[name]; if (!shot) throw new Error('shots.json に無い: ' + name);
   const cfg = { ...shot, fps: cfgAll.fps };
+  // 画角は名前（cams の A・B・C…）でも書ける。keys は [秒, 名前] の並び
+  const cam = c => typeof c === 'string' ? cfgAll.cams[c] : c;
+  if (shot.keys) { cfg.keys = shot.keys.map(([t, c]) => ({ t, ...cam(c) })); cfg.camA = cfg.keys[0]; }
+  else { cfg.camA = cam(shot.camA); if (shot.camB) cfg.camB = cam(shot.camB); }
   const W = cfgAll.width, H = cfgAll.height, N = Math.min(Math.round(shot.seconds*cfgAll.fps), +(process.env.LIMIT || 1e9));   // LIMIT=コマ数 で試し撮り
   const frameDir = path.join(outDir, name + '_frames'); fs.rmSync(frameDir, { recursive: true, force: true }); fs.mkdirSync(frameDir);
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });

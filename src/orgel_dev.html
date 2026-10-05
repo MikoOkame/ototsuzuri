@@ -3029,9 +3029,19 @@ if(CAPTURE){
       if(cfg.play){ song.pos = 0; song.started = true; isPlaying = true; CAP.playing = true; }
       window.__cap.pose(cfg, 0); renderer.render(scene, camera);
     },
+    // 画角：keys（[{t, pos, target, fov}…]、時刻順）があれば隣り合う画角の間を滑らかに移る（同じ画角を続けると留まる）。
+    // 無ければ camA → camB を move の間に移る
     pose:(cfg, t)=>{
-      const a = cfg.camA, b = cfg.camB || cfg.camA;
-      const k = cfg.move ? ease(Math.min(1, Math.max(0, (t - (cfg.move.start || 0))/cfg.move.seconds))) : 0;
+      let a, b, k;
+      if(cfg.keys){
+        const K = cfg.keys; let i = 0;
+        while(i < K.length - 2 && t >= K[i+1].t) i++;
+        a = K[i]; b = K[Math.min(i + 1, K.length - 1)];
+        k = b.t > a.t ? ease(Math.min(1, Math.max(0, (t - a.t)/(b.t - a.t)))) : 0;
+      } else {
+        a = cfg.camA; b = cfg.camB || cfg.camA;
+        k = cfg.move ? ease(Math.min(1, Math.max(0, (t - (cfg.move.start || 0))/cfg.move.seconds))) : 0;
+      }
       CAP.cam.pos.copy(V(a.pos)).lerp(V(b.pos), k);
       CAP.cam.target.copy(V(a.target)).lerp(V(b.target), k);
       CAP.cam.fov = a.fov + (b.fov - a.fov)*k;
