@@ -458,7 +458,7 @@ scene.add(sillFill);
 const boxInside = [];
 const BOX_LIFT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxi') ? parseFloat(PARAMS.get('boxi')) : .35;   // 強さ（調整用に ?boxi=）
 // 夜（部屋の灯りも消えた後）は暗く沈んだ色に掛けても上がらないので、元の色に掛けて足す（調整用に ?boxn=）
-const BOX_NIGHT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxn') ? parseFloat(PARAMS.get('boxn')) : .07;
+const BOX_NIGHT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxn') ? parseFloat(PARAMS.get('boxn')) : .04;
 const _boxC = new THREE.Color();
 
 /* ================================================================
@@ -1777,6 +1777,9 @@ const orgel = (()=>{
   const PIN_FX = PARAMS.has('pinfx') ? parseInt(PARAMS.get('pinfx')) : 3;
   const PIN_GLOW = PARAMS.has('pinc') ? new THREE.Color(...PARAMS.get('pinc').split(',').map(Number)) : new THREE.Color(2.4, 1.75, .55);   // 線形色。1 を超えた分が発光（調整用に ?pinc=r,g,b）
   const PIN_TRAIL = PARAMS.has('pinw') ? parseFloat(PARAMS.get('pinw')) : 1.8;   // 弾いた後に光が残る回転角（rad）
+  const PIN_TRAIL_LV = PARAMS.has('pintr') ? parseFloat(PARAMS.get('pintr')) : .22;  // 残る光の強さ（弾いた瞬間＝1）
+  const PIN_FLASH = .45;   // 弾いた瞬間の強い光が消えるまでの秒数
+  let pinAct = 0;          // 再生中 1、止めるとゆっくり 0 へ（急に消さない）
   const pinGeo = new THREE.CylinderGeometry(.05, .05, .26, 6);
   const pinMat = toon(0xffffff);
   pinMat.onBeforeCompile = sh=>{
@@ -1824,7 +1827,7 @@ const orgel = (()=>{
     for(const part of ['melody','arp']) for(const [t,midi] of (track[part] || [])){
       const tooth = pitches.indexOf(midi), key = t.toFixed(3) + ':' + tooth;
       if(seen.has(key)) continue; seen.add(key);
-      notes.push({ t, tooth, psi:-t/loopSec*Math.PI*2 });
+      notes.push({ t, tooth, psi:-t/loopSec*Math.PI*2, age:99 });
     }
     notes.sort((a,b)=>a.t-b.t);
     if(pins){ cyl.remove(pins); pins.dispose(); }
@@ -1870,7 +1873,7 @@ const orgel = (()=>{
       const a = lastPos, b = pos;
       for(const nt of notes){
         const hit = b >= a ? (nt.t >= a && nt.t < b) : (nt.t >= a || nt.t < b);   // [a, b)：曲の頭（0 秒）の音も弾く。同じ音を二度弾かない
-        if(hit){ const tt = teeth[nt.tooth]; tt.age = 0; tt.amp = .09*(.35 + .65*Math.sqrt(song.speed)); struck.push(nt.tooth); }
+        if(hit){ nt.age = 0; const tt = teeth[nt.tooth]; tt.age = 0; tt.amp = .09*(.35 + .65*Math.sqrt(song.speed)); struck.push(nt.tooth); }
       }
       lastPos = pos;
     }
@@ -1882,21 +1885,28 @@ const orgel = (()=>{
     fan.rotation.x = -w2*(.8/.3)*5;
     barrel.rotation.y = -ang*.4;
     if(pins){
-      const act = PIN_FX >= 1 ? (song.started && isPlaying ? Math.min(1, song.speed) : 0) : 1;   // 止まっている間は光らせない
+      const actT = song.started && isPlaying ? Math.min(1, song.speed) : 0;   // 止まっている間は光らせない
+      pinAct += (actT - pinAct)*(1 - Math.exp(-dt/(actT < pinAct ? .7 : .12)));   // 消えるときはゆっくり、点くときは素早く
+      const act = PIN_FX >= 1 ? pinAct : 1;
       for(let i=0;i<notes.length;i++){
         const nt = notes[i];
         let w = nt.psi + ang;
         w = Math.atan2(Math.sin(w), Math.cos(w));
         // 0：歯に近づくピンを染める（元）。1 以上：弾いた後も光を残し、見える円筒の上側へ回る間に消えていく
         //（櫛は箱の前の壁に隠れて、弾く瞬間はほとんどの画角で見えないため）
+        // 1 以上：弾いた瞬間だけ強く光り（PIN_FLASH 秒で引く）、その後は弱い光（PIN_TRAIL_LV）を残して円筒の上側へ流す
+        nt.age += dt;
+        const flash = PIN_FX >= 1 && nt.age < PIN_FLASH ? Math.pow(1 - nt.age/PIN_FLASH, 2) : 0;
+        const trail = w >= 0 && w < PIN_TRAIL && nt.age < loopSec*.9 ? PIN_TRAIL_LV*(1 - w/PIN_TRAIL) : 0;   // 今の一周で弾いたピンだけ（再生し始めにまだ鳴っていないピンを光らせない）
         const hot = (PIN_FX >= 1
-          ? (w > -.25 && w < 0 ? Math.pow(1 + w/.25, 2) : w >= 0 && w < PIN_TRAIL ? Math.pow(1 - w/PIN_TRAIL, 1.5) : 0)
+          ? Math.max(flash, trail)
           : (w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0))*act;
         pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_FX >= 1 ? PIN_GLOW : PIN_HOT, hot));
-        if(halos){ const ca = halos.geometry.attributes.color.array; ca[i*3] = HALO_COL.r*hot; ca[i*3+1] = HALO_COL.g*hot; ca[i*3+2] = HALO_COL.b*hot; }
-        if(PIN_FX >= 2 && (hot > 0 || nt.big)){
-          nt.big = hot > 0;
-          _pm.compose(nt.P, nt.Q, _ps.setScalar(1 + .8*hot)); pins.setMatrixAt(i, _pm);
+        const hit = flash*act;   // 暈と膨らみは弾いた瞬間だけ（残る光には付けない）
+        if(halos){ const ca = halos.geometry.attributes.color.array; ca[i*3] = HALO_COL.r*hit; ca[i*3+1] = HALO_COL.g*hit; ca[i*3+2] = HALO_COL.b*hit; }
+        if(PIN_FX >= 2 && (hit > 0 || nt.big)){
+          nt.big = hit > 0;
+          _pm.compose(nt.P, nt.Q, _ps.setScalar(1 + .8*hit)); pins.setMatrixAt(i, _pm);
           pins.instanceMatrix.needsUpdate = true;
         }
       }
