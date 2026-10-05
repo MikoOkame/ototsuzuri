@@ -1606,7 +1606,9 @@ const FRAME_SCALE = 3;                                                      // �
 ================================================================ */
 const ORGEL_SCALE = PARAMS.has('oscale') ? parseFloat(PARAMS.get('oscale')) : .02;
 const orgelRoot = new THREE.Group();
-orgelRoot.position.set(0, SILL_TOP + .5*ORGEL_SCALE, .06);
+// 脚の底（箱の単位で y = -.55 - .38*.6）を敷物の面（SILL_TOP + .002）に載せる。少しでも沈むと敷物に食い込んで見える
+const ORGEL_FOOT = .55 + .38*.6;
+orgelRoot.position.set(0, SILL_TOP + .002 + ORGEL_FOOT*ORGEL_SCALE + .0004, .06);
 orgelRoot.scale.setScalar(ORGEL_SCALE);
 scene.add(orgelRoot);
 const OUT_MECH = 0x3b2a3c;
