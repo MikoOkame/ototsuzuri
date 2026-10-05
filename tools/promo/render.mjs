@@ -28,6 +28,29 @@ const port = server.address().port;
 const browser = await chromium.launch({ executablePath: CHROME,
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 
+// 1枚絵（シェアカードなど）：still: true。dayT を配列にすると時刻ごとに1枚ずつ。曲を流して at 秒進めたところを撮る
+async function still(name, shot, cfg, t) {
+  const W = shot.width || cfgAll.width, H = shot.height || cfgAll.height;
+  const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: shot.scale || 1 });
+  page.on('pageerror', e => console.log('[pageerror]', e.message));
+  await page.route(/unpkg\.com\/three@[^/]+\/(.*)/, route => {
+    const m = route.request().url().match(/unpkg\.com\/three@[^/]+\/(.*?)(\?.*)?$/);
+    route.fulfill({ path: path.join(here, 'node_modules/three', m[1]), contentType: 'application/javascript' });
+  });
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  await page.goto(`http://127.0.0.1:${port}/src/orgel_dev.html?capture&seed=${cfgAll.seed}&t=${t}&birds=${cfgAll.birds}`);
+  await page.waitForFunction(() => window.__cap && window.__cap.ready(), null, { timeout: 120000 });
+  const c = { ...cfg, dayT: t };
+  await page.evaluate(c => window.__cap.setup(c), c);
+  await page.evaluate(c => window.__cap.start(c), c);
+  const n = Math.round((shot.at || 0)*cfgAll.fps);
+  for (let i = 1; i <= n; i++) await page.evaluate(([c, k]) => window.__cap.frame(c, k), [c, i]);
+  const png = path.join(outDir, `${name}_${t}.png`);
+  await page.screenshot({ path: png, timeout: 180000 });
+  console.log('書き出した', png);
+  await page.close();
+}
+
 for (const name of names) {
   const shot = cfgAll.shots[name]; if (!shot) throw new Error('shots.json に無い: ' + name);
   const cfg = { ...shot, fps: cfgAll.fps };
@@ -35,6 +58,7 @@ for (const name of names) {
   const cam = c => typeof c === 'string' ? cfgAll.cams[c] : c;
   if (shot.keys) { cfg.keys = shot.keys.map(([t, c]) => ({ t, ...cam(c) })); cfg.camA = cfg.keys[0]; }
   else { cfg.camA = cam(shot.camA); if (shot.camB) cfg.camB = cam(shot.camB); }
+  if (shot.still) { for (const t of [].concat(shot.dayT)) await still(name, shot, cfg, t); continue; }
   const W = cfgAll.width, H = cfgAll.height, N = Math.min(Math.round(shot.seconds*cfgAll.fps), +(process.env.LIMIT || 1e9));   // LIMIT=コマ数 で試し撮り
   const frameDir = path.join(outDir, name + '_frames'); fs.rmSync(frameDir, { recursive: true, force: true }); fs.mkdirSync(frameDir);
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
