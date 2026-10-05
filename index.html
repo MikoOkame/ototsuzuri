@@ -54,6 +54,14 @@
   }
   #dbg button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
   #dbg #tLabel{ min-width:9em; }
+  #dbg #camEdit{ flex-wrap:wrap; }
+  #dbg #camEdit[hidden]{ display:none; }
+  #dbg #camEdit label{ display:flex; align-items:center; gap:4px; }
+  /* 16px 未満だと iPhone は入力のときに画面を拡大してしまう */
+  #dbg #camEdit input{ font:16px ui-monospace,Menlo,monospace; width:10.5em; padding:2px 6px; border-radius:6px;
+    border:1px solid var(--line); background:rgba(255,255,255,.08); color:var(--ink); }
+  #dbg #camEdit input.short{ width:3.5em; }
+  #dbg #camLabel{ flex:1; font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre; user-select:text; -webkit-user-select:text; }
   /* 再生の操作（v10 の構成。鍵盤はない）
      アイコンと外枠はユーザーの手描きに差し替える前提。
      アイコン：ICONS（script 内）に画像を入れるとボタンの文字の代わりに表示される。
@@ -109,6 +117,8 @@
   #dbg{ bottom:calc(186px + env(safe-area-inset-bottom,0px)); }
   /* フレームレート表示（?fps のときだけ。制作用。公開時はこの1行と、末尾の「フレームレート表示」節を外す） */
   #fps{ position:fixed; left:8px; top:calc(52px + env(safe-area-inset-top,0px)); z-index:30; font:11px/1.3 ui-monospace,Menlo,monospace; color:#fff; background:rgba(10,8,24,.72); border-radius:6px; padding:4px 7px; pointer-events:none; white-space:pre; }
+  /* 撮影中は UI を出さない（紙目と周辺減光は絵の一部なので残す） */
+  body.capturing #tag, body.capturing #hint, body.capturing #player, body.capturing #listBtn, body.capturing #dbg, body.capturing #fps, body.capturing .modalOverlay{ display:none !important; }
 </style>
 </head>
 <body>
@@ -145,6 +155,13 @@
 
 <div id="dbg">
   <div class="row"><span id="tLabel">-</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
+  <div class="row"><span id="camLabel">-</span><button id="camCopy">画角をコピー</button><button id="camEditBtn" aria-pressed="false">入力</button></div>
+  <div class="row" id="camEdit" hidden>
+    <label>位置<input id="camPos" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+    <label>注視<input id="camTgt" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+    <label>画角<input id="camFov" inputmode="decimal" autocomplete="off" class="short"></label>
+    <button id="camApply">適用</button><button id="camFree">解除</button>
+  </div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -176,6 +193,12 @@ const MOTION = reduceMotion ? 0.25 : 1;
 const DEV = false;
 const ROOT = '';                                   // リポジトリ直下への相対パス（公開版では ''）
 const PARAMS = new URLSearchParams(DEV ? location.search : '');
+/* 撮影モード（?capture、制作版のみ）：時間をコマ単位で進めて書き出す。乱数も種で固定して、毎回同じ絵にする */
+const CAPTURE = PARAMS.has('capture');
+if(CAPTURE){
+  let sd = (parseInt(PARAMS.get('seed')) || 1) >>> 0;
+  Math.random = ()=>{ sd |= 0; sd = sd + 0x6D2B79F5 | 0; let t = Math.imul(sd ^ sd >>> 15, 1 | sd); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0)/4294967296; };
+}
 
 /* ================================================================
    一日の時計
@@ -341,6 +364,7 @@ const interior = [];
 function inToon(color, extra){
   const m = toon(color, extra);
   interior.push({ m, base:new THREE.Color(color) });
+  m.userData.base = interior[interior.length - 1].base;
   return m;
 }
 /* 時間帯の色をそのまま持つ素材 */
@@ -430,6 +454,13 @@ scene.add(roomLight);
 const sillFill = new THREE.PointLight(0xfff1dc, 0, 1.6, 1.2);
 sillFill.position.set(.25, 1.6, .9);
 scene.add(sillFill);
+/* 箱の中の照り返し（蓋裏の鏡の見立て）。点光源は影が無いので箱の壁を抜けて敷物まで照らす。
+   だから光源は置かず、箱の中の素材（boxInside）にだけ自分の色の発光を足して起こす。?boxlight=0 で無し */
+const boxInside = [];
+const BOX_LIFT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxi') ? parseFloat(PARAMS.get('boxi')) : .35;   // 強さ（調整用に ?boxi=）
+// 夜（部屋の灯りも消えた後）は暗く沈んだ色に掛けても上がらないので、元の色に掛けて足す（調整用に ?boxn=）
+const BOX_NIGHT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxn') ? parseFloat(PARAMS.get('boxn')) : .04;
+const _boxC = new THREE.Color();
 
 /* ================================================================
    空：グラデーションのドーム＋ノイズの滲み。カメラに追従する。
@@ -1129,10 +1160,20 @@ function midiToFreq(m){ return 440*Math.pow(2, (m-69)/12); }
 function clampNum(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
 function ensureAudioCtx(){
+  if(CAPTURE && !audioCtx) return null;   // 撮影中は実時間の音を鳴らさない（音は後でオフラインで書き出す）
   if(!audioCtx){
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if(!Ctx) return null;
-    audioCtx = new Ctx();
+    buildAudioGraph(new Ctx());
+  }
+  return audioCtx;
+}
+// 音の経路（masterGain → コンプレッサー → 出力、リバーブ）を ctx に組む。撮影の音の書き出しではオフラインの ctx で使う
+function buildAudioGraph(ctx){
+  {
+    audioCtx = ctx;
+    reverbConvolver = null; reverbWet = null; sfxGain = null;
+    for(const k in reverbSends) delete reverbSends[k];
     masterGain = audioCtx.createGain();
     masterGain.gain.value = muted ? 0 : volume;
     masterCompressor = audioCtx.createDynamicsCompressor();
@@ -1361,10 +1402,11 @@ function ensureSfx(){
 // 個体ごとの声の高さ：id から ±30 セントのずれ
 function voiceCents(id){ let h = 0; for(const c of (id||'')) h = (h*31 + c.charCodeAt(0))%997; return (h%61) - 30; }
 // さえずり：正弦波が音程へしゃくり上がる（style 0）か、上から降りる（style 1：応える側）
-function chirp(m, vol=1, style=0, cents=0){
+function chirp(m, vol=1, style=0, cents=0, at){
+  if(CAPTURE && !CAP.offline){ if(CAP.rec) CAP.chirps.push([CAP.time, m, vol, style, cents]); return; }
   const ctx = ensureAudioCtx(); if(!ctx || vol <= .01) return;
   ensureSfx();
-  const t = ctx.currentTime + .005, f = midiToFreq(m)*Math.pow(2, cents/1200), dur = .26;
+  const t = (at !== undefined ? at : ctx.currentTime) + .005, f = midiToFreq(m)*Math.pow(2, cents/1200), dur = .26;
   const out = ctx.createGain(); out.gain.value = vol; out.connect(sfxGain);
   const g = ctx.createGain();
   g.gain.setValueAtTime(.0001, t);
@@ -1578,7 +1620,9 @@ const FRAME_SCALE = 3;                                                      // �
 ================================================================ */
 const ORGEL_SCALE = PARAMS.has('oscale') ? parseFloat(PARAMS.get('oscale')) : .02;
 const orgelRoot = new THREE.Group();
-orgelRoot.position.set(0, SILL_TOP + .5*ORGEL_SCALE, .06);
+// 脚の底（箱の単位で y = -.55 - .38*.6）を敷物の面（SILL_TOP + .002）に載せる。少しでも沈むと敷物に食い込んで見える
+const ORGEL_FOOT = .55 + .38*.6;
+orgelRoot.position.set(0, SILL_TOP + .002 + ORGEL_FOOT*ORGEL_SCALE + .0004, .06);
 orgelRoot.scale.setScalar(ORGEL_SCALE);
 scene.add(orgelRoot);
 const OUT_MECH = 0x3b2a3c;
@@ -1682,14 +1726,19 @@ const orgel = (()=>{
   click.rotation.y = .5;
 
   /* 仮の箱（ユーザーの .glb が届いたら差し替える） */
-  const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xbca6c8);
+  const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xa6c0c8);
   const boxRoot = new THREE.Group(); orgelRoot.add(boxRoot);
   const IW = 6.1, ID = 5.0, WT = .5, WH = 5.4;
-  obox(IW*2 + WT*2, .5, ID*2 + WT*2, wood, 0, -.25, 0, boxRoot, .03).name = 'Box_Bottom';
-  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, ID + WT/2, boxRoot, .03).name = 'Box_Front';
-  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, -ID - WT/2, boxRoot, .03).name = 'Box_Back';
-  obox(WT, WH, ID*2, wood, IW + WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Right';
-  obox(WT, WH, ID*2, wood, -IW - WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Left';
+  // 内張り：形はそのまま、箱の内側を向く面だけ蓋裏と同じ布の色にする（?lining=0 で無し）。面の順は +x,-x,+y,-y,+z,-z
+  const LINED = PARAMS.get('lining') !== '0';
+  const woodIn = LINED ? lining : inToon(0x6f4a3c);
+  const lined = face=>{ const a = Array(6).fill(wood); a[face] = woodIn; return a; };
+  boxInside.push(brass, brassDk, steel, steelDk, leadMat, woodIn);
+  obox(IW*2 + WT*2, .5, ID*2 + WT*2, lined(2), 0, -.25, 0, boxRoot, .03).name = 'Box_Bottom';
+  obox(IW*2 + WT*2, WH, WT, lined(5), 0, WH/2 - .5 + .25, ID + WT/2, boxRoot, .03).name = 'Box_Front';
+  obox(IW*2 + WT*2, WH, WT, lined(4), 0, WH/2 - .5 + .25, -ID - WT/2, boxRoot, .03).name = 'Box_Back';
+  obox(WT, WH, ID*2, lined(1), IW + WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Right';
+  obox(WT, WH, ID*2, lined(0), -IW - WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Left';
   /* 銘板：壁に埋め込んで面一にする（浮かせると上から見たとき剥がれた板に見える） */
   obox(2.2, .9, .12, inlay, 0, 2.4, ID + WT - .05, boxRoot, 0).name = 'Nameplate';
   const keyhole = new THREE.Mesh(new THREE.CircleGeometry(.13, 16), new THREE.MeshBasicMaterial({ color:0x4a3346 }));
@@ -1703,13 +1752,54 @@ const orgel = (()=>{
   obox(IW*2 + WT*2 + .2, .6, LD, wood, 0, .3, LD/2 - .1, lidPivot, .03).name = 'Lid_Top';
   obox((IW*2)*.7, .03, LD*.62, inlay, 0, .615, LD/2 - .1, lidPivot, .01).name = 'Lid_Inlay';
   const lin = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - .2, ID*2 - .2), lining);
-  lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin);
+  lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin); lin.name = 'Lid_Lining';
+  /* 蓋裏の鏡（?mirror=0 で無し）。映り込みは計算せず、淡い青灰と斜めの光の筋で鏡に見せる。
+     箱の中の明るさは boxInside の発光が受け持ち、鏡はその照り返しの出どころの理由づけ */
+  if(PARAMS.get('mirror') !== '0'){
+    const mc = document.createElement('canvas'); mc.width = mc.height = 128;
+    const mg = mc.getContext('2d');
+    const gr = mg.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#e9f0f4'); gr.addColorStop(1, '#c6d3dc');
+    mg.fillStyle = gr; mg.fillRect(0, 0, 128, 128);
+    mg.fillStyle = 'rgba(255,255,255,.75)';
+    for(const [x0, w] of [[30, 16], [58, 6]]){ mg.beginPath(); mg.moveTo(x0, 0); mg.lineTo(x0 + w, 0); mg.lineTo(x0 + w - 60, 128); mg.lineTo(x0 - 60, 128); mg.fill(); }
+    mg.strokeStyle = '#8f8a98'; mg.lineWidth = 4; mg.strokeRect(2, 2, 124, 124);
+    const mtex = new THREE.CanvasTexture(mc); mtex.colorSpace = THREE.SRGBColorSpace;
+    const mirror = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - 1.4, ID*2 - 1.4), inToon(0xeef3f7, { map:mtex }));
+    boxInside.push(mirror.material);
+    mirror.rotation.x = Math.PI/2; mirror.position.set(0, -.015, LD/2 - .1); lidPivot.add(mirror); mirror.name = 'Lid_Mirror';
+  }
   lidPivot.rotation.x = -1.75;   // 蓋は開けたまま
 
   /* ---- 曲ごとに作る部分：櫛歯とピン ---- */
   const PIN_BASE = new THREE.Color(0xc3c9d6), PIN_HOT = new THREE.Color(0xffd894), _pc = new THREE.Color();
+  /* 弾いたピンの目立たせ方（?pinfx=0〜3 で比較）。0：色が淡い黄に変わるだけ（元）
+     1：光る金色（色の 1 を超えた分を発光として足す。暗い時間帯でも光る）
+     2：1＋光っている間ピンが膨らむ  3：2＋光っているピンの周りに光の暈（かさ） */
+  const PIN_FX = PARAMS.has('pinfx') ? parseInt(PARAMS.get('pinfx')) : 3;
+  const PIN_GLOW = PARAMS.has('pinc') ? new THREE.Color(...PARAMS.get('pinc').split(',').map(Number)) : new THREE.Color(2.4, 1.75, .55);   // 線形色。1 を超えた分が発光（調整用に ?pinc=r,g,b）
+  const PIN_TRAIL = PARAMS.has('pinw') ? parseFloat(PARAMS.get('pinw')) : 1.8;   // 弾いた後に光が残る回転角（rad）
+  const PIN_TRAIL_LV = PARAMS.has('pintr') ? parseFloat(PARAMS.get('pintr')) : .22;  // 残る光の強さ（弾いた瞬間＝1）
+  const PIN_FLASH = .45;   // 弾いた瞬間の強い光が消えるまでの秒数
+  let pinAct = 0;          // 再生中 1、止めるとゆっくり 0 へ（急に消さない）
   const pinGeo = new THREE.CylinderGeometry(.05, .05, .26, 6);
   const pinMat = toon(0xffffff);
+  pinMat.onBeforeCompile = sh=>{
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <color_fragment>', `vec3 pinGlow = vec3(0.0);
+#if defined( USE_COLOR )
+  diffuseColor.rgb *= min(vColor, vec3(1.0));
+  pinGlow = max(vColor - 1.0, 0.0);
+#endif`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pinGlow;');
+  };
+  // 光の暈（ピンの先。加算合成なので色が黒の所は見えない）
+  const haloTex = (()=>{ const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.25, 'rgba(255,240,200,.85)'); gr.addColorStop(1, 'rgba(255,220,150,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const haloMat = new THREE.PointsMaterial({ size:.014, map:haloTex, vertexColors:true, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+  const HALO_COL = new THREE.Color(PIN_GLOW.r, PIN_GLOW.g, PIN_GLOW.b).multiplyScalar(.45/Math.max(PIN_GLOW.r, PIN_GLOW.g, PIN_GLOW.b));
+  let halos = null;
   let pins = null, teeth = [], notes = [], pitches = [], loopSec = 30, toothX = ()=>0;
   const combGroup = new THREE.Group(); mech.add(combGroup);
   function setTrack(track){
@@ -1738,7 +1828,7 @@ const orgel = (()=>{
     for(const part of ['melody','arp']) for(const [t,midi] of (track[part] || [])){
       const tooth = pitches.indexOf(midi), key = t.toFixed(3) + ':' + tooth;
       if(seen.has(key)) continue; seen.add(key);
-      notes.push({ t, tooth, psi:-t/loopSec*Math.PI*2 });
+      notes.push({ t, tooth, psi:-t/loopSec*Math.PI*2, age:99 });
     }
     notes.sort((a,b)=>a.t-b.t);
     if(pins){ cyl.remove(pins); pins.dispose(); }
@@ -1749,10 +1839,20 @@ const orgel = (()=>{
       P.set(toothX(nt.tooth), Math.sin(nt.psi)*rr, Math.cos(nt.psi)*rr);
       Qq.setFromEuler(E.set(Math.PI/2 - nt.psi, 0, 0));
       Mm.compose(P, Qq, S1); pins.setMatrixAt(i, Mm);
+      nt.P = P.clone(); nt.Q = Qq.clone();
       pins.setColorAt(i, PIN_BASE);
     });
     pins.instanceMatrix.needsUpdate = true;
     cyl.add(pins);
+    if(halos){ cyl.remove(halos); halos.geometry.dispose(); halos = null; }
+    if(PIN_FX >= 3){
+      const hp = new Float32Array(notes.length*3), rr = R + .2;
+      notes.forEach((nt, i)=>{ hp[i*3] = toothX(nt.tooth); hp[i*3+1] = Math.sin(nt.psi)*rr; hp[i*3+2] = Math.cos(nt.psi)*rr; });
+      const hg = new THREE.BufferGeometry();
+      hg.setAttribute('position', new THREE.BufferAttribute(hp, 3));
+      hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(notes.length*3), 3));
+      halos = new THREE.Points(hg, haloMat); halos.name = 'PinHalos'; halos.renderOrder = 2; cyl.add(halos);
+    }
     lastPos = 0;
   }
 
@@ -1765,6 +1865,7 @@ const orgel = (()=>{
 
   /* ---- 毎フレーム：song.pos から回転と弾きを出す ---- */
   let lastPos = 0;
+  const _pm = new THREE.Matrix4(), _ps = new THREE.Vector3();
   const struck = [];   // このフレームで弾いた歯（音符の発生に使う）
   function update(dt){
     const pos = song.started ? song.pos : lastPos;
@@ -1772,8 +1873,8 @@ const orgel = (()=>{
     if(song.started){
       const a = lastPos, b = pos;
       for(const nt of notes){
-        const hit = b >= a ? (nt.t > a && nt.t <= b) : (nt.t > a || nt.t <= b);
-        if(hit){ const tt = teeth[nt.tooth]; tt.age = 0; tt.amp = .09*(.35 + .65*Math.sqrt(song.speed)); struck.push(nt.tooth); }
+        const hit = b >= a ? (nt.t >= a && nt.t < b) : (nt.t >= a || nt.t < b);   // [a, b)：曲の頭（0 秒）の音も弾く。同じ音を二度弾かない
+        if(hit){ nt.age = 0; const tt = teeth[nt.tooth]; tt.age = 0; tt.amp = .09*(.35 + .65*Math.sqrt(song.speed)); struck.push(nt.tooth); }
       }
       lastPos = pos;
     }
@@ -1785,13 +1886,33 @@ const orgel = (()=>{
     fan.rotation.x = -w2*(.8/.3)*5;
     barrel.rotation.y = -ang*.4;
     if(pins){
+      const actT = song.started && isPlaying ? Math.min(1, song.speed) : 0;   // 止まっている間は光らせない
+      pinAct += (actT - pinAct)*(1 - Math.exp(-dt/(actT < pinAct ? .7 : .12)));   // 消えるときはゆっくり、点くときは素早く
+      const act = PIN_FX >= 1 ? pinAct : 1;
       for(let i=0;i<notes.length;i++){
-        let w = notes[i].psi + ang;
+        const nt = notes[i];
+        let w = nt.psi + ang;
         w = Math.atan2(Math.sin(w), Math.cos(w));
-        const hot = w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0;
-        pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_HOT, hot));
+        // 0：歯に近づくピンを染める（元）。1 以上：弾いた後も光を残し、見える円筒の上側へ回る間に消えていく
+        //（櫛は箱の前の壁に隠れて、弾く瞬間はほとんどの画角で見えないため）
+        // 1 以上：弾いた瞬間だけ強く光り（PIN_FLASH 秒で引く）、その後は弱い光（PIN_TRAIL_LV）を残して円筒の上側へ流す
+        nt.age += dt;
+        const flash = PIN_FX >= 1 && nt.age < PIN_FLASH ? Math.pow(1 - nt.age/PIN_FLASH, 2) : 0;
+        const trail = w >= 0 && w < PIN_TRAIL && nt.age < loopSec*.9 ? PIN_TRAIL_LV*(1 - w/PIN_TRAIL) : 0;   // 今の一周で弾いたピンだけ（再生し始めにまだ鳴っていないピンを光らせない）
+        const hot = (PIN_FX >= 1
+          ? Math.max(flash, trail)
+          : (w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0))*act;
+        pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_FX >= 1 ? PIN_GLOW : PIN_HOT, hot));
+        const hit = flash*act;   // 暈と膨らみは弾いた瞬間だけ（残る光には付けない）
+        if(halos){ const ca = halos.geometry.attributes.color.array; ca[i*3] = HALO_COL.r*hit; ca[i*3+1] = HALO_COL.g*hit; ca[i*3+2] = HALO_COL.b*hit; }
+        if(PIN_FX >= 2 && (hit > 0 || nt.big)){
+          nt.big = hit > 0;
+          _pm.compose(nt.P, nt.Q, _ps.setScalar(1 + .8*hit)); pins.setMatrixAt(i, _pm);
+          pins.instanceMatrix.needsUpdate = true;
+        }
       }
       pins.instanceColor.needsUpdate = true;
+      if(halos) halos.geometry.attributes.color.needsUpdate = true;
     }
     for(const t of teeth){
       t.age += dt;
@@ -1807,7 +1928,10 @@ const orgel = (()=>{
   fan.children.forEach((c, i)=>{ if(c.isMesh) c.name = i === 0 ? 'Fan_Hub' : 'Fan_Blade_' + i; });
   setTrack(TRACKS[0]);
   return { update, setTrack, tipWorld, struck, get teeth(){ return teeth; },
-    exportParts:()=>({ cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE }) };
+    exportParts:()=>{
+      if(pins) notes.forEach((nt, i)=>{ _pm.compose(nt.P, nt.Q, _ps.setScalar(1)); pins.setMatrixAt(i, _pm); nt.big = false; });
+      return { cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE };
+    } };
 })();
 
 /* ---------- ベランダ ---------- */
@@ -2311,6 +2435,8 @@ function enterPerch(b){
   b.mode = 'perch'; b.singing = false; b.state = ''; b.wait = .4;
   if(isDay()){ b.seated = false; setAnim(b, 'idle', true, .4, true); }
   else { sitDown(b); }
+  // 撮影：singOnLand に名前のある鳥は、着地したらすぐ歌い出す（昼・曲が鳴っている・声オンのとき）
+  if(CAPTURE && CAP.rec && CAP.singOnLand && CAP.singOnLand.includes(b.id) && isDay() && playingNow() && birdVoice) startSing(b, .3);
 }
 
 /* ---- ホバリングして歌う（昼・外の鳥・同時に1羽） ---- */
@@ -2382,7 +2508,9 @@ function birdsUpdate(dt){
     if(want && b.mode === 'away'){
       if(b.needDraw || b.loading){ if(!b.loading) assignBird(b); continue; }   // 顔ぶれを決めてテクスチャが届くまで待つ
       if(b.arriveAt < 0){ b.arriveAt = clock + stagger + Math.random()*1.2; stagger += 1.1 + Math.random()*.9; }
-      if(clock >= b.arriveAt) beginArrive(b);
+      // 撮影で飛来の秒を指定した鳥は、その秒ちょうどに来る（他の鳥とのずらしは使わない）
+      const capHold = CAPTURE && CAP.hold && CAP.hold[b.idx] != null ? CAP.hold[b.idx] : null;
+      if(capHold != null ? CAP.rec && CAP.time >= capHold : clock >= b.arriveAt) beginArrive(b);
     } else if(!want && b.mode !== 'away' && !(b.mode === 'fly' && b.fl.dir < 0)){
       if(b.leaveAt < 0){ b.leaveAt = clock + stagger + Math.random()*.8; stagger += 1.1 + Math.random()*.9; }
       if(clock >= b.leaveAt){ b.leaveAt = -1; beginLeave(b); }
@@ -2612,6 +2740,9 @@ function applyTime(t){
 
   tinted.forEach(o=>o.m.color.copy(p[o.key]));
   interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
+  const lift = BOX_LIFT*(sunUp*.5 + .5 + room);   // 昼は外光、夜は部屋の灯りの照り返し
+  const boxNight = BOX_NIGHT*(1 - sunUp)*(1 - room);
+  boxInside.forEach(m=>m.emissive.copy(m.color).multiplyScalar(lift).add(_boxC.copy(m.userData.base).multiplyScalar(boxNight)));
   clouds.forEach(c=>c.material.color.copy(p.cloud));
 
   paintWindows(p, litFrac(t), false);
@@ -2645,8 +2776,44 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
     snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
 refreshSpeedButtons();
+/* 今の画角（カメラの位置・注視点・縦の画角）を数値で出す。宣伝動画の設定（tools/promo/shots.json）にそのまま貼れる形 */
+function cameraSpec(){
+  const r = v=>+v.toFixed(3);
+  return { pos:[r(camera.position.x), r(camera.position.y), r(camera.position.z)], target:[r(LOOK.x), r(LOOK.y), r(LOOK.z)], fov:r(camera.fov) };
+}
+const camLabel = document.getElementById('camLabel');
+document.getElementById('camCopy').addEventListener('click', ()=>{
+  const txt = JSON.stringify(cameraSpec());
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ camLabel.textContent = 'コピーした\n' + txt; }, ()=>{ camLabel.textContent = txt; });
+  console.log('画角', txt);
+});
+/* 画角の手入力：位置・注視点は「x, y, z」、画角は縦の度。位置の欄に「画角をコピー」の JSON をそのまま貼ってもよい。
+   適用すると、解除するまでその画角に固定する（固定中はドラッグ・ホイールでは動かない。鳥には触れられる） */
+let manualCam = null;
+const camEdit = document.getElementById('camEdit'), camEditBtn = document.getElementById('camEditBtn');
+const camPos = document.getElementById('camPos'), camTgt = document.getElementById('camTgt'), camFov = document.getElementById('camFov');
+function fillCamInputs(c){ camPos.value = c.pos.join(', '); camTgt.value = c.target.join(', '); camFov.value = c.fov; }
+camEditBtn.addEventListener('click', ()=>{
+  camEdit.hidden = !camEdit.hidden; camEditBtn.setAttribute('aria-pressed', String(!camEdit.hidden));
+  if(!camEdit.hidden) fillCamInputs(cameraSpec());
+});
+function applyCamInputs(){
+  try{
+    if(camPos.value.trim().startsWith('{')) fillCamInputs(JSON.parse(camPos.value));
+    const v3 = str=>{ const a = String(str).split(/[\s,]+/).filter(Boolean).map(Number); if(a.length !== 3 || !a.every(Number.isFinite)) throw 0; return new THREE.Vector3(...a); };
+    const pos = v3(camPos.value), target = v3(camTgt.value), fov = parseFloat(camFov.value);
+    if(!(fov >= 1 && fov <= 150) || pos.distanceTo(target) < 1e-4) throw 0;
+    manualCam = { pos, target, fov };
+    camLabelT = 0;
+  }catch(err){ camLabel.textContent = '数値が読めない\n位置・注視は「x, y, z」、画角は 1〜150'; camLabelT = performance.now() + 2000; }
+}
+document.getElementById('camApply').addEventListener('click', applyCamInputs);
+[camPos, camTgt, camFov].forEach(el=>el.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); applyCamInputs(); } }));
+document.getElementById('camFree').addEventListener('click', ()=>{ manualCam = null; resize(); camLabelT = 0; });   // resize で画角を画面の向きの既定に戻す
+let camLabelT = 0;
 function refreshDebug(){
   if(!dbg.classList.contains('on')) return;
+  if(performance.now() - camLabelT > 250){ camLabelT = performance.now(); const c = cameraSpec(); camLabel.textContent = `位置 ${c.pos.join(', ')}\n注視 ${c.target.join(', ')}\n画角 ${c.fov}°` + (manualCam ? '（手入力で固定中）' : ''); }
   const h = Math.floor(dayT*24), mnt = Math.floor((dayT*24 - h)*60);
   tLabel.textContent = `${curName} ${String(h).padStart(2,'0')}:${String(mnt).padStart(2,'0')}  月${(moonPhase*100).toFixed(0)}%`;
   if(document.activeElement !== tSlider) tSlider.value = Math.round(dayT*1000);
@@ -2674,6 +2841,8 @@ if(PARAMS.has('panz')) ORBIT.pan.z = ORBIT.cPan.z = parseFloat(PARAMS.get('panz'
 // ?look=x,y,z：その点をカメラの中心にする（確認用。距離に関係なく狙える）
 if(PARAMS.has('look')){ const [x,y,z] = PARAMS.get('look').split(',').map(Number); ORBIT.pan.set(x,y,z).sub(ORBIT_CENTER).divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }
 const hint = document.getElementById('hint');
+// マウスのある PC では操作の説明を PC 用にする
+if(matchMedia('(hover: hover) and (pointer: fine)').matches) hint.textContent = 'ドラッグで回る／ホイールで寄る／右ドラッグで移動／鳥をクリックすると鳴く';
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
 const clampO = ()=>{
@@ -2692,20 +2861,23 @@ function panBy(dx, dy){   // 画面の右・上の向きへ、距離に応じた
 }
 const pointers = new Map();
 let lastPinch = 0, lastMid = null;
+// マウス：左ドラッグで回る、右（中）ドラッグで平行移動、ホイールで寄る・引く。タッチは指の本数で決める
 canvas.addEventListener('pointerdown', e=>{
-  const hit = pointers.size === 0 ? pickBird(e.clientX, e.clientY) : null;
+  const panBtn = e.pointerType === 'mouse' && (e.button === 2 || e.button === 1);
+  const hit = pointers.size === 0 && !panBtn ? pickBird(e.clientX, e.clientY) : null;
   if(hit){ touchBird(hit.bird, hit.point); hideHint(); return; }
   canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY, pan:panBtn });
   lastPinch = 0; lastMid = null;
   hideHint();
 });
 canvas.addEventListener('pointermove', e=>{
   const p = pointers.get(e.pointerId);
   if(!p) return;
+  if(manualCam){ p.x = e.clientX; p.y = e.clientY; return; }   // 手入力の画角で固定中
   if(pointers.size === 1){
-    ORBIT.az -= (e.clientX - p.x)*.005;
-    ORBIT.el += (e.clientY - p.y)*.004;
+    if(p.pan) panBy(e.clientX - p.x, e.clientY - p.y);
+    else { ORBIT.az -= (e.clientX - p.x)*.005; ORBIT.el += (e.clientY - p.y)*.004; }
   }
   p.x = e.clientX; p.y = e.clientY;
   if(pointers.size === 2){
@@ -2720,10 +2892,27 @@ canvas.addEventListener('pointermove', e=>{
 function endPointer(e){ pointers.delete(e.pointerId); lastPinch = 0; lastMid = null; }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e=>e.preventDefault());    // 右ドラッグの邪魔をさせない
+canvas.addEventListener('mousedown', e=>{ if(e.button === 1) e.preventDefault(); });   // 中ボタンの自動スクロールを出さない
+/* ホイール：マウスのホイールは寄る・引く、トラックパッドの2本指スクロールは平行移動。
+   ブラウザからはどちらも wheel なので値の形で見分ける。ホイールは行単位か、横が 0 で縦が大きな整数で来る。
+   トラックパッドは小さい値・小数・横成分が混じる。一連の動き（間が 200ms 未満）の途中では判定を変えない
+   （ただしトラックパッドらしい値が来たらそちらに倒す）。見分けを誤ると平行移動になる（以前の動き） */
+let wheelKind = 'pad', lastWheelT = 0;
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
-  if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;          // トラックパッドのピンチ
-  else panBy(-e.deltaX, -e.deltaY);                       // 2本指スクロール
+  if(manualCam) return;
+  const now = performance.now();
+  const padLike = e.deltaMode === 0 && (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50);
+  if(now - lastWheelT > 200) wheelKind = padLike ? 'pad' : 'mouse';
+  else if(padLike) wheelKind = 'pad';
+  lastWheelT = now;
+  if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;           // トラックパッドのピンチ
+  else if(wheelKind === 'mouse'){                          // マウスのホイール：1目盛り（100px）で約 16%
+    const dy = e.deltaMode === 1 ? e.deltaY*33 : e.deltaMode === 2 ? e.deltaY*400 : e.deltaY;
+    ORBIT.dist *= Math.exp(dy*.0015);
+  }
+  else panBy(-e.deltaX, -e.deltaY);                        // 2本指スクロール
   clampO();
   hideHint();
 }, { passive:false });
@@ -2753,7 +2942,7 @@ if(PARAMS.has('export')){
     const P = orgel.exportParts();
     const baseOf = new Map(interior.map(o=>[o.m, o.base]));
     const NAMES = { 0xa98549:'Brass', 0x7f6038:'Brass_Dark', 0xb6b8bb:'Steel', 0x7a7c80:'Steel_Dark', 0x55535c:'Lead',
-                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xbca6c8:'Lining', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
+                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xa6c0c8:'Lining', 0xeef3f7:'Mirror', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
     const mats = new Map();
     const matFor = (m, hexOverride)=>{
       const c = hexOverride !== undefined ? new THREE.Color(hexOverride) : (baseOf.get(m) || m.color);
@@ -2769,7 +2958,8 @@ if(PARAMS.has('export')){
     orgelRoot.updateMatrixWorld(true);
     const counter = {};
     function copy(src, parentName){
-      if(src.isMesh && isOutline(src.material)) return null;
+      if(src.isLight || src.isPoints) return null;
+      if(src.isMesh && !Array.isArray(src.material) && isOutline(src.material)) return null;
       let node;
       if(src.isInstancedMesh){
         node = new THREE.Group();
@@ -2782,7 +2972,7 @@ if(PARAMS.has('export')){
         }
       } else if(src.isMesh){
         const g = src.geometry.clone(); g.scale(K, K, K);
-        node = new THREE.Mesh(g, matFor(src.material));
+        node = new THREE.Mesh(g, Array.isArray(src.material) ? src.material.map(m=>matFor(m)) : matFor(src.material));
       } else node = new THREE.Group();
       node.name = src.name || (()=>{ const k = (parentName || 'Part') + (src.isMesh ? '_Mesh' : '_Group'); counter[k] = (counter[k] || 0) + 1; return k + counter[k]; })();
       node.position.copy(src.position).multiplyScalar(K);
@@ -2817,14 +3007,130 @@ const fpsMeter = (()=>{
   };
 })();
 
+
+/* ================================================================
+   撮影モード（?capture、制作版のみ）：宣伝動画を1コマずつ書き出すための仕組み。
+   tools/promo/render.mjs が使う。手順と設定は tools/promo/README.md
+   ・時間は実時間でなく、1コマ = 1/fps 秒ずつ進める（重い環境でも動きと音がずれない）
+   ・曲は鳴らさず、曲の位置だけをコマに合わせて進める。音はあとでオフラインで同じ時間軸に書き出す
+   ・鳥の声は撮影中に起きた時刻を記録しておき、音の書き出しで同じ時刻に鳴らす
+================================================================ */
+const CAP = { cam:null, time:0, rec:false, chirps:[], offline:false, playing:false, pos0:0, daySpeed:0, hold:null, day0:0 };
+if(CAPTURE){
+  document.body.classList.add('capturing');
+  const V = a=>new THREE.Vector3(...a);
+  const ease = t=>t*t*(3 - 2*t);   // 端でゆっくり、中で速い
+  /* 単調な3次補間（Fritsch–Carlson）。キーの間で行き過ぎたり戻ったりしない */
+  function smoothKeys(K, t){
+    const n = K.length;
+    if(t <= K[0][0]) return K[0][1];
+    if(t >= K[n-1][0]) return K[n-1][1];
+    const d = [], m = [];
+    for(let i=0;i<n-1;i++) d.push((K[i+1][1] - K[i][1])/(K[i+1][0] - K[i][0]));
+    m.push(d[0]);
+    for(let i=1;i<n-1;i++) m.push(d[i-1]*d[i] <= 0 ? 0 : (d[i-1] + d[i])/2);
+    m.push(d[n-2]);
+    for(let i=0;i<n-1;i++){
+      if(d[i] === 0){ m[i] = m[i+1] = 0; continue; }
+      const a = m[i]/d[i], b = m[i+1]/d[i], h = a*a + b*b;
+      if(h > 9){ const r = 3/Math.sqrt(h); m[i] = r*a*d[i]; m[i+1] = r*b*d[i]; }
+    }
+    let i = 0; while(t > K[i+1][0]) i++;
+    const h = K[i+1][0] - K[i][0], u = (t - K[i][0])/h, u2 = u*u, u3 = u2*u;
+    return (2*u3 - 3*u2 + 1)*K[i][1] + (u3 - 2*u2 + u)*h*m[i] + (-2*u3 + 3*u2)*K[i+1][1] + (u3 - u2)*h*m[i+1];
+  }
+  CAP.advance = dt=>{
+    CAP.time += dt;
+    if(CAP.daySpeed){ dayT += dt*CAP.daySpeed; if(dayT >= 1){ dayT -= 1; dayCount++; } }
+    if(CAP.playing){ song.pos = (song.pos + dt) % song.track.loopSec; }
+  };
+  window.__cap = {
+    ready:()=>birds.length > 0 && birds.every(b=>b.mode !== 'fly' && !b.loading),
+    // 撮る前の準備：時刻・曲・鳥を決め、warmup 秒だけ（曲を止めたまま）進めて落ち着かせる
+    setup:cfg=>{
+      timeSpeed = 0; dayT = cfg.dayKeys ? cfg.dayKeys[0][1] % 1 : cfg.dayT; CAP.daySpeed = 0;
+      CAP.hold = cfg.birdArrive || null; CAP.singOnLand = cfg.singOnLand || null;   // 鳥ごとの「飛来を始めてよい撮影の秒」。準備の間は全員待たせる
+      // 飛来の秒を指定した鳥は、居なかったことにして始める（?birds だと開いた時点で止まり木に居るため）
+      if(CAP.hold) for(const b of birds) if(CAP.hold[b.idx] != null){
+        b.mode = 'away'; b.model.visible = false; b.arriveAt = -1; b.leaveAt = -1; b.singing = false; b.seated = false;
+      }   // 準備の間は時刻を止める（撮影の 0 秒が cfg.dayT になるように）
+      const idx = Math.max(0, TRACKS.findIndex(t=>t.id === cfg.track));
+      currentTrackIdx = idx; song.track = TRACKS[idx]; orgel.setTrack(song.track);
+      song.pos = 0; song.speed = 1; song.started = false; isPlaying = false; CAP.playing = false;
+      CAP.cam = { pos:V(cfg.camA.pos), target:V(cfg.camA.target), fov:cfg.camA.fov };
+      const n = Math.round((cfg.warmup || 0)*cfg.fps);
+      for(let i=0;i<n;i++) stepFrame(1/cfg.fps, 0, true);   // 準備のコマは描かない（描画が溜まって遅くなる）
+      return { warmFrames:n };
+    },
+    // 撮影開始：曲を頭から（曲の位置 0）。ここからの時刻が動画の 0 秒
+    start:cfg=>{
+      CAP.time = 0; CAP.rec = true; CAP.chirps = []; CAP.daySpeed = cfg.dayKeys ? 0 : cfg.daySeconds ? 1/cfg.daySeconds : 0;
+      CAP.day0 = dayCount;
+      if(cfg.play){ song.pos = 0; song.started = true; isPlaying = true; CAP.playing = true; }
+      window.__cap.pose(cfg, 0); renderer.render(scene, camera);
+    },
+    // 画角：keys（[{t, pos, target, fov}…]、時刻順）があれば隣り合う画角の間を滑らかに移る（同じ画角を続けると留まる）。
+    // 無ければ camA → camB を move の間に移る
+    pose:(cfg, t)=>{
+      // 時刻：dayKeys（[秒, 時刻]…。時刻は 1 を越えて翌日へ続けてよい）があれば、その間を滑らかに（速さが急に変わらないように）つなぐ
+      if(cfg.dayKeys){ const v = smoothKeys(cfg.dayKeys, t); dayT = v - Math.floor(v); dayCount = CAP.day0 + Math.floor(v); }
+      let a, b, k;
+      if(cfg.keys){
+        const K = cfg.keys; let i = 0;
+        while(i < K.length - 2 && t >= K[i+1].t) i++;
+        a = K[i]; b = K[Math.min(i + 1, K.length - 1)];
+        k = b.t > a.t ? ease(Math.min(1, Math.max(0, (t - a.t)/(b.t - a.t)))) : 0;
+      } else {
+        a = cfg.camA; b = cfg.camB || cfg.camA;
+        k = cfg.move ? ease(Math.min(1, Math.max(0, (t - (cfg.move.start || 0))/cfg.move.seconds))) : 0;
+      }
+      CAP.cam.pos.copy(V(a.pos)).lerp(V(b.pos), k);
+      CAP.cam.target.copy(V(a.target)).lerp(V(b.target), k);
+      CAP.cam.fov = a.fov + (b.fov - a.fov)*k;
+    },
+    // 1コマ進める（frame 1 以降）
+    frame:(cfg, i)=>{ window.__cap.pose(cfg, i/cfg.fps); stepFrame(1/cfg.fps, 0); },
+    // 音の書き出し：同じ時間軸で曲（全パート）と鳥の声をオフラインで合成し、WAV（base64）を返す
+    renderAudio:async (cfg, seconds)=>{
+      const SR = 48000, tail = 2.5;
+      const off = new OfflineAudioContext(2, Math.ceil(SR*(seconds + tail)), SR);
+      CAP.offline = true; activeNodes = [];
+      buildAudioGraph(off); masterGain.gain.value = volume;
+      const tr = TRACKS.find(t=>t.id === cfg.track), insts = trackInstruments(tr);
+      for(const part of PARTS){
+        for(const [t, midi, dur, vel] of (tr[part] || [])){
+          for(let loop = 0; loop*tr.loopSec + t < seconds; loop++){
+            const at = loop*tr.loopSec + t;
+            (INSTRUMENTS[insts[part]] || INSTRUMENTS[DEFAULT_INSTRUMENTS[part]])(at, midi, dur, vel);
+          }
+        }
+      }
+      for(const [t, m, vol, style, cents] of CAP.chirps) if(t < seconds) chirp(m, vol, style, cents, t);
+      const buf = await off.startRendering();
+      CAP.offline = false;
+      // 16bit の WAV にする（尾の残響も含める）
+      const n = buf.length, ch = [buf.getChannelData(0), buf.getChannelData(1)];
+      const out = new DataView(new ArrayBuffer(44 + n*4));
+      const str = (o, x)=>{ for(let i=0;i<x.length;i++) out.setUint8(o + i, x.charCodeAt(i)); };
+      str(0,'RIFF'); out.setUint32(4, 36 + n*4, true); str(8,'WAVE'); str(12,'fmt '); out.setUint32(16, 16, true);
+      out.setUint16(20, 1, true); out.setUint16(22, 2, true); out.setUint32(24, SR, true); out.setUint32(28, SR*4, true);
+      out.setUint16(32, 4, true); out.setUint16(34, 16, true); str(36,'data'); out.setUint32(40, n*4, true);
+      for(let i=0, o=44; i<n; i++) for(let c=0;c<2;c++, o+=2){ const v = Math.max(-1, Math.min(1, ch[c][i])); out.setInt16(o, v < 0 ? v*0x8000 : v*0x7fff, true); }
+      const u8 = new Uint8Array(out.buffer); let bin = '';
+      for(let i=0;i<u8.length;i+=0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return { b64:btoa(bin), chirps:CAP.chirps.length };
+    },
+  };
+}
+
 /* ---------- ループ ---------- */
 let last = performance.now(), clock = 0, curtainTick = 0;
 const LOOK = new THREE.Vector3();
 applyTime(dayT);
 paintWindows(cur, litFrac(dayT), true);
-renderer.setAnimationLoop(now=>{
-  const dt = Math.min((now - last)/1000, .05);
-  last = now; clock += dt;
+function stepFrame(dt, now, noRender){
+  clock += dt;
+  if(CAPTURE) CAP.advance(dt);
 
   dayT += dt*timeSpeed/DAY_LEN;
   if(dayT >= 1){ dayT -= 1; dayCount++; }
@@ -2844,6 +3150,11 @@ renderer.setAnimationLoop(now=>{
   camera.position.y = THREE.MathUtils.clamp(camera.position.y, ROOM_FLOOR + .3, ROOM_CEIL - .3);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, .25, ROOM_D - .3);
   camera.lookAt(LOOK);
+  const fixedCam = CAPTURE ? CAP.cam : manualCam;   // 撮影、またはデバッグの手入力：画角を数値で直接与える
+  if(fixedCam){
+    camera.position.copy(fixedCam.pos); LOOK.copy(fixedCam.target);
+    camera.fov = fixedCam.fov; camera.updateProjectionMatrix(); camera.lookAt(LOOK);
+  }
 
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
@@ -2911,8 +3222,13 @@ renderer.setAnimationLoop(now=>{
   updateNotes(dt);
   if(guide.visible) ring.material.opacity = .55 + Math.sin(clock*3)*.35;
 
-  renderer.render(scene, camera);
+  if(!noRender) renderer.render(scene, camera);
   if(fpsMeter) fpsMeter(now);
+}
+if(!CAPTURE) renderer.setAnimationLoop(now=>{
+  const dt = Math.min((now - last)/1000, .05);
+  last = now;
+  stepFrame(dt, now);
 });
 </script>
 </body>
