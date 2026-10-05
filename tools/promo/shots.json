@@ -4,7 +4,7 @@
   "height": 1080,
   "fps": 30,
   "seed": 7,
-  "birds": "shiro,momo,sora",
+  "birds": "kurumi,momo,sora",
   "cams": {
     "_説明": "名前つきの画角。ユーザー指定（制作版 ?debug の「画角をコピー」の形）",
     "A": {
