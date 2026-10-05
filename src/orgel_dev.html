@@ -2434,6 +2434,8 @@ function enterPerch(b){
   b.mode = 'perch'; b.singing = false; b.state = ''; b.wait = .4;
   if(isDay()){ b.seated = false; setAnim(b, 'idle', true, .4, true); }
   else { sitDown(b); }
+  // 撮影：singOnLand に名前のある鳥は、着地したらすぐ歌い出す（昼・曲が鳴っている・声オンのとき）
+  if(CAPTURE && CAP.rec && CAP.singOnLand && CAP.singOnLand.includes(b.id) && isDay() && playingNow() && birdVoice) startSing(b, .3);
 }
 
 /* ---- ホバリングして歌う（昼・外の鳥・同時に1羽） ---- */
@@ -3046,7 +3048,7 @@ if(CAPTURE){
     // 撮る前の準備：時刻・曲・鳥を決め、warmup 秒だけ（曲を止めたまま）進めて落ち着かせる
     setup:cfg=>{
       timeSpeed = 0; dayT = cfg.dayKeys ? cfg.dayKeys[0][1] % 1 : cfg.dayT; CAP.daySpeed = 0;
-      CAP.hold = cfg.birdArrive || null;   // 鳥ごとの「飛来を始めてよい撮影の秒」。準備の間は全員待たせる
+      CAP.hold = cfg.birdArrive || null; CAP.singOnLand = cfg.singOnLand || null;   // 鳥ごとの「飛来を始めてよい撮影の秒」。準備の間は全員待たせる
       // 飛来の秒を指定した鳥は、居なかったことにして始める（?birds だと開いた時点で止まり木に居るため）
       if(CAP.hold) for(const b of birds) if(CAP.hold[b.idx] != null){
         b.mode = 'away'; b.model.visible = false; b.arriveAt = -1; b.leaveAt = -1; b.singing = false; b.seated = false;
