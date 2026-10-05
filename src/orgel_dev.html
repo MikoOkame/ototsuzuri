@@ -2790,6 +2790,8 @@ if(PARAMS.has('panz')) ORBIT.pan.z = ORBIT.cPan.z = parseFloat(PARAMS.get('panz'
 // ?look=x,y,z：その点をカメラの中心にする（確認用。距離に関係なく狙える）
 if(PARAMS.has('look')){ const [x,y,z] = PARAMS.get('look').split(',').map(Number); ORBIT.pan.set(x,y,z).sub(ORBIT_CENTER).divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }
 const hint = document.getElementById('hint');
+// マウスのある PC では操作の説明を PC 用にする
+if(matchMedia('(hover: hover) and (pointer: fine)').matches) hint.textContent = 'ドラッグで回る／ホイールで寄る／右ドラッグで移動／鳥をクリックすると鳴く';
 let hinted = false;
 function hideHint(){ if(!hinted){ hinted = true; hint.style.opacity = '0'; } }
 const clampO = ()=>{
@@ -2808,11 +2810,13 @@ function panBy(dx, dy){   // 画面の右・上の向きへ、距離に応じた
 }
 const pointers = new Map();
 let lastPinch = 0, lastMid = null;
+// マウス：左ドラッグで回る、右（中）ドラッグで平行移動、ホイールで寄る・引く。タッチは指の本数で決める
 canvas.addEventListener('pointerdown', e=>{
-  const hit = pointers.size === 0 ? pickBird(e.clientX, e.clientY) : null;
+  const panBtn = e.pointerType === 'mouse' && (e.button === 2 || e.button === 1);
+  const hit = pointers.size === 0 && !panBtn ? pickBird(e.clientX, e.clientY) : null;
   if(hit){ touchBird(hit.bird, hit.point); hideHint(); return; }
   canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY, pan:panBtn });
   lastPinch = 0; lastMid = null;
   hideHint();
 });
@@ -2820,8 +2824,8 @@ canvas.addEventListener('pointermove', e=>{
   const p = pointers.get(e.pointerId);
   if(!p) return;
   if(pointers.size === 1){
-    ORBIT.az -= (e.clientX - p.x)*.005;
-    ORBIT.el += (e.clientY - p.y)*.004;
+    if(p.pan) panBy(e.clientX - p.x, e.clientY - p.y);
+    else { ORBIT.az -= (e.clientX - p.x)*.005; ORBIT.el += (e.clientY - p.y)*.004; }
   }
   p.x = e.clientX; p.y = e.clientY;
   if(pointers.size === 2){
@@ -2836,10 +2840,26 @@ canvas.addEventListener('pointermove', e=>{
 function endPointer(e){ pointers.delete(e.pointerId); lastPinch = 0; lastMid = null; }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('contextmenu', e=>e.preventDefault());    // 右ドラッグの邪魔をさせない
+canvas.addEventListener('mousedown', e=>{ if(e.button === 1) e.preventDefault(); });   // 中ボタンの自動スクロールを出さない
+/* ホイール：マウスのホイールは寄る・引く、トラックパッドの2本指スクロールは平行移動。
+   ブラウザからはどちらも wheel なので値の形で見分ける。ホイールは行単位か、横が 0 で縦が大きな整数で来る。
+   トラックパッドは小さい値・小数・横成分が混じる。一連の動き（間が 200ms 未満）の途中では判定を変えない
+   （ただしトラックパッドらしい値が来たらそちらに倒す）。見分けを誤ると平行移動になる（以前の動き） */
+let wheelKind = 'pad', lastWheelT = 0;
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
-  if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;          // トラックパッドのピンチ
-  else panBy(-e.deltaX, -e.deltaY);                       // 2本指スクロール
+  const now = performance.now();
+  const padLike = e.deltaMode === 0 && (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50);
+  if(now - lastWheelT > 200) wheelKind = padLike ? 'pad' : 'mouse';
+  else if(padLike) wheelKind = 'pad';
+  lastWheelT = now;
+  if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;           // トラックパッドのピンチ
+  else if(wheelKind === 'mouse'){                          // マウスのホイール：1目盛り（100px）で約 16%
+    const dy = e.deltaMode === 1 ? e.deltaY*33 : e.deltaMode === 2 ? e.deltaY*400 : e.deltaY;
+    ORBIT.dist *= Math.exp(dy*.0015);
+  }
+  else panBy(-e.deltaX, -e.deltaY);                        // 2本指スクロール
   clampO();
   hideHint();
 }, { passive:false });
