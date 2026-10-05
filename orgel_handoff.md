@@ -104,6 +104,12 @@
 窓台への載せ方（第2段階で確定）
 - 機構と箱は試作の単位（≒cm）のまま組み、`ORGEL_SCALE = 0.02` で m に落とす（箱の外形 約 27 × 22 cm。0.012 では小さすぎた）。レースの敷物の上、`orgelRoot` に入れる。蓋は開けたまま。
 - 室内側から弱い補助光（`sillFill`）を当てる。昼は外光の照り返し程度、夜は室内照明と一緒に落ちる（真っ暗にはしない）。
+- 箱の中の明るさ（宣伝動画の寄りで中が暗かったため）：
+  1. 箱の中の素材（`boxInside`：真鍮・鋼・鉛・内張り・鏡）にだけ、自分の色の発光を足して起こす。強さ `BOX_LIFT = 0.35` に時間帯（昼は外光、夜は部屋の灯り）を掛ける。
+     点光源は使わない。影が無いので箱の壁を抜けて、敷物と箱の外側まで照らしてしまったため。
+  2. 蓋の裏に鏡（`Lid_Mirror`）。映り込みは計算せず、淡い青灰と斜めの光の筋のテクスチャで鏡に見せる。箱の中が明るい理由づけ。
+  3. 仮の箱は形を変えず、内側を向く面だけ蓋裏と同じ内張りの色（`0xbca6c8`）にする（試し）。
+  - 比較用：`?boxlight=0`（1 無し）、`?boxi=数値`（1 の強さ）、`?mirror=0`、`?lining=0`。
 - シリンダーの回転は `song.pos`（音の時計 × 回転速度）から出す。櫛歯とピンは `orgel.setTrack(track)` で曲ごとに作り直す（melody と arp の音高を低い順に並べ、1音高 = 1枚の歯）。
 
 ### 音（第3段階で実装済み）
@@ -132,7 +138,7 @@
 1. `src/orgel_dev.html?export` を開き、`window.__exportOrgel('曲の id')` を呼ぶと GLB（base64）が返る。ピンと櫛歯はその曲から作る。
    - 輪郭線の殻は外す。ピンは1本ずつのメッシュ（`Pin_001`〜）。動く部品は静止の姿勢、蓋は閉じた状態（`Lid` は原点が蝶番、ローカル X で開く）。
    - 単位は実寸の m（窓辺の 0.02 倍を形に焼き込む）。`MechAnchor`（機構の底面中心）の空オブジェクトを入れる。
-   - 材質は色だけ（Brass／Brass_Dark／Steel／Steel_Dark／Lead／Wood／Wood_Dark／Inlay／Lining／Keyhole／Pin）。トゥーンの陰影は Maya で付け直す。
+   - 材質は色だけ（Brass／Brass_Dark／Steel／Steel_Dark／Lead／Wood／Wood_Dark／Inlay／Lining／Mirror／Keyhole／Pin）。トゥーンの陰影は Maya で付け直す。
 2. Blender（bpy 4.2）で GLB を読み、FBX に書き出す：`bpy.ops.export_scene.fbx(apply_unit_scale=True, apply_scale_options='FBX_SCALE_UNITS', axis_forward='-Z', axis_up='Y', object_types={'EMPTY','MESH'}, add_leaf_bones=False, bake_anim=False)`。FBX の単位は UnitScaleFactor 100（Maya では cm に換算されて 26.8 × 13.4 × 22.4 cm になる）、Y が上。
 - 書き出し済み：うみわたりのうた（櫛歯19本、部品180、メッシュ148）→ `assets/box/orgel_umiwatari.fbx`（ユーザーの許可を得て追加）。
 
@@ -142,6 +148,7 @@
 - 名前に `Lid` を含むオブジェクトを蓋とし、原点を蝶番にしてローカルX軸まわりに開く。
 - 単位（m / cm / mm）を自動判別。読み込んだ箱は色とテクスチャを保ったままトゥーン陰影に変換。
 - 箱の細部は基本テクスチャで描く方針（輪郭が変わるものだけモデル）。
+- 箱の内側を明るい色（内張り）で作っておくこと。中の起こし（上の `boxInside`）を .glb の内側の材質にも掛ける方法は、箱が届いてから決める（未実装）。
 
 ## 6. 鳥
 - モデル：`assets/bird_mdl/glb/` の28クリップ版。30fps。骨名 `neck` `head` をコードから参照する。

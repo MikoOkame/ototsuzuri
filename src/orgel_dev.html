@@ -439,6 +439,10 @@ scene.add(roomLight);
 const sillFill = new THREE.PointLight(0xfff1dc, 0, 1.6, 1.2);
 sillFill.position.set(.25, 1.6, .9);
 scene.add(sillFill);
+/* 箱の中の照り返し（蓋裏の鏡の見立て）。点光源は影が無いので箱の壁を抜けて敷物まで照らす。
+   だから光源は置かず、箱の中の素材（boxInside）にだけ自分の色の発光を足して起こす。?boxlight=0 で無し */
+const boxInside = [];
+const BOX_LIFT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxi') ? parseFloat(PARAMS.get('boxi')) : .35;   // 強さ（調整用に ?boxi=）
 
 /* ================================================================
    空：グラデーションのドーム＋ノイズの滲み。カメラに追従する。
@@ -1705,11 +1709,16 @@ const orgel = (()=>{
   const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xbca6c8);
   const boxRoot = new THREE.Group(); orgelRoot.add(boxRoot);
   const IW = 6.1, ID = 5.0, WT = .5, WH = 5.4;
-  obox(IW*2 + WT*2, .5, ID*2 + WT*2, wood, 0, -.25, 0, boxRoot, .03).name = 'Box_Bottom';
-  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, ID + WT/2, boxRoot, .03).name = 'Box_Front';
-  obox(IW*2 + WT*2, WH, WT, wood, 0, WH/2 - .5 + .25, -ID - WT/2, boxRoot, .03).name = 'Box_Back';
-  obox(WT, WH, ID*2, wood, IW + WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Right';
-  obox(WT, WH, ID*2, wood, -IW - WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Left';
+  // 内張り：形はそのまま、箱の内側を向く面だけ蓋裏と同じ布の色にする（?lining=0 で無し）。面の順は +x,-x,+y,-y,+z,-z
+  const LINED = PARAMS.get('lining') !== '0';
+  const woodIn = LINED ? lining : inToon(0x6f4a3c);
+  const lined = face=>{ const a = Array(6).fill(wood); a[face] = woodIn; return a; };
+  boxInside.push(brass, brassDk, steel, steelDk, leadMat, woodIn);
+  obox(IW*2 + WT*2, .5, ID*2 + WT*2, lined(2), 0, -.25, 0, boxRoot, .03).name = 'Box_Bottom';
+  obox(IW*2 + WT*2, WH, WT, lined(5), 0, WH/2 - .5 + .25, ID + WT/2, boxRoot, .03).name = 'Box_Front';
+  obox(IW*2 + WT*2, WH, WT, lined(4), 0, WH/2 - .5 + .25, -ID - WT/2, boxRoot, .03).name = 'Box_Back';
+  obox(WT, WH, ID*2, lined(1), IW + WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Right';
+  obox(WT, WH, ID*2, lined(0), -IW - WT/2, WH/2 - .5 + .25, 0, boxRoot, .03).name = 'Box_Left';
   /* 銘板：壁に埋め込んで面一にする（浮かせると上から見たとき剥がれた板に見える） */
   obox(2.2, .9, .12, inlay, 0, 2.4, ID + WT - .05, boxRoot, 0).name = 'Nameplate';
   const keyhole = new THREE.Mesh(new THREE.CircleGeometry(.13, 16), new THREE.MeshBasicMaterial({ color:0x4a3346 }));
@@ -1723,7 +1732,22 @@ const orgel = (()=>{
   obox(IW*2 + WT*2 + .2, .6, LD, wood, 0, .3, LD/2 - .1, lidPivot, .03).name = 'Lid_Top';
   obox((IW*2)*.7, .03, LD*.62, inlay, 0, .615, LD/2 - .1, lidPivot, .01).name = 'Lid_Inlay';
   const lin = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - .2, ID*2 - .2), lining);
-  lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin);
+  lin.rotation.x = Math.PI/2; lin.position.set(0, -.005, LD/2 - .1); lidPivot.add(lin); lin.name = 'Lid_Lining';
+  /* 蓋裏の鏡（?mirror=0 で無し）。映り込みは計算せず、淡い青灰と斜めの光の筋で鏡に見せる。
+     箱の中の明るさは boxInside の発光が受け持ち、鏡はその照り返しの出どころの理由づけ */
+  if(PARAMS.get('mirror') !== '0'){
+    const mc = document.createElement('canvas'); mc.width = mc.height = 128;
+    const mg = mc.getContext('2d');
+    const gr = mg.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#e9f0f4'); gr.addColorStop(1, '#c6d3dc');
+    mg.fillStyle = gr; mg.fillRect(0, 0, 128, 128);
+    mg.fillStyle = 'rgba(255,255,255,.75)';
+    for(const [x0, w] of [[30, 16], [58, 6]]){ mg.beginPath(); mg.moveTo(x0, 0); mg.lineTo(x0 + w, 0); mg.lineTo(x0 + w - 60, 128); mg.lineTo(x0 - 60, 128); mg.fill(); }
+    mg.strokeStyle = '#8f8a98'; mg.lineWidth = 4; mg.strokeRect(2, 2, 124, 124);
+    const mtex = new THREE.CanvasTexture(mc); mtex.colorSpace = THREE.SRGBColorSpace;
+    const mirror = new THREE.Mesh(new THREE.PlaneGeometry(IW*2 - 1.4, ID*2 - 1.4), inToon(0xeef3f7, { map:mtex }));
+    boxInside.push(mirror.material);
+    mirror.rotation.x = Math.PI/2; mirror.position.set(0, -.015, LD/2 - .1); lidPivot.add(mirror); mirror.name = 'Lid_Mirror';
+  }
   lidPivot.rotation.x = -1.75;   // 蓋は開けたまま
 
   /* ---- 曲ごとに作る部分：櫛歯とピン ---- */
@@ -2632,6 +2656,8 @@ function applyTime(t){
 
   tinted.forEach(o=>o.m.color.copy(p[o.key]));
   interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
+  const lift = BOX_LIFT*(sunUp*.5 + .5 + room);   // 昼は外光、夜は部屋の灯りの照り返し
+  boxInside.forEach(m=>m.emissive.copy(m.color).multiplyScalar(lift));
   clouds.forEach(c=>c.material.color.copy(p.cloud));
 
   paintWindows(p, litFrac(t), false);
@@ -2786,7 +2812,7 @@ if(PARAMS.has('export')){
     const P = orgel.exportParts();
     const baseOf = new Map(interior.map(o=>[o.m, o.base]));
     const NAMES = { 0xa98549:'Brass', 0x7f6038:'Brass_Dark', 0xb6b8bb:'Steel', 0x7a7c80:'Steel_Dark', 0x55535c:'Lead',
-                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xbca6c8:'Lining', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
+                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xbca6c8:'Lining', 0xeef3f7:'Mirror', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
     const mats = new Map();
     const matFor = (m, hexOverride)=>{
       const c = hexOverride !== undefined ? new THREE.Color(hexOverride) : (baseOf.get(m) || m.color);
@@ -2802,7 +2828,8 @@ if(PARAMS.has('export')){
     orgelRoot.updateMatrixWorld(true);
     const counter = {};
     function copy(src, parentName){
-      if(src.isMesh && isOutline(src.material)) return null;
+      if(src.isLight) return null;
+      if(src.isMesh && !Array.isArray(src.material) && isOutline(src.material)) return null;
       let node;
       if(src.isInstancedMesh){
         node = new THREE.Group();
@@ -2815,7 +2842,7 @@ if(PARAMS.has('export')){
         }
       } else if(src.isMesh){
         const g = src.geometry.clone(); g.scale(K, K, K);
-        node = new THREE.Mesh(g, matFor(src.material));
+        node = new THREE.Mesh(g, Array.isArray(src.material) ? src.material.map(m=>matFor(m)) : matFor(src.material));
       } else node = new THREE.Group();
       node.name = src.name || (()=>{ const k = (parentName || 'Part') + (src.isMesh ? '_Mesh' : '_Group'); counter[k] = (counter[k] || 0) + 1; return k + counter[k]; })();
       node.position.copy(src.position).multiplyScalar(K);
