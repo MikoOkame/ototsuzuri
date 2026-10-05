@@ -53,6 +53,13 @@
   }
   #dbg button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
   #dbg #tLabel{ min-width:9em; }
+  #dbg #camEdit{ flex-wrap:wrap; }
+  #dbg #camEdit[hidden]{ display:none; }
+  #dbg #camEdit label{ display:flex; align-items:center; gap:4px; }
+  /* 16px 未満だと iPhone は入力のときに画面を拡大してしまう */
+  #dbg #camEdit input{ font:16px ui-monospace,Menlo,monospace; width:10.5em; padding:2px 6px; border-radius:6px;
+    border:1px solid var(--line); background:rgba(255,255,255,.08); color:var(--ink); }
+  #dbg #camEdit input.short{ width:3.5em; }
   #dbg #camLabel{ flex:1; font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre; user-select:text; -webkit-user-select:text; }
   /* 再生の操作（v10 の構成。鍵盤はない）
      アイコンと外枠はユーザーの手描きに差し替える前提。
@@ -147,7 +154,13 @@
 
 <div id="dbg">
   <div class="row"><span id="tLabel">-</span><span id="buildTag" style="opacity:.6">build 0603a</span><input type="range" id="tSlider" min="0" max="1000" value="0"></div>
-  <div class="row"><span id="camLabel">-</span><button id="camCopy">画角をコピー</button></div>
+  <div class="row"><span id="camLabel">-</span><button id="camCopy">画角をコピー</button><button id="camEditBtn" aria-pressed="false">入力</button></div>
+  <div class="row" id="camEdit" hidden>
+    <label>位置<input id="camPos" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+    <label>注視<input id="camTgt" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+    <label>画角<input id="camFov" inputmode="decimal" autocomplete="off" class="short"></label>
+    <button id="camApply">適用</button><button id="camFree">解除</button>
+  </div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -2759,10 +2772,33 @@ document.getElementById('camCopy').addEventListener('click', ()=>{
   (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>{ camLabel.textContent = 'コピーした\n' + txt; }, ()=>{ camLabel.textContent = txt; });
   console.log('画角', txt);
 });
+/* 画角の手入力：位置・注視点は「x, y, z」、画角は縦の度。位置の欄に「画角をコピー」の JSON をそのまま貼ってもよい。
+   適用すると、解除するまでその画角に固定する（固定中はドラッグ・ホイールでは動かない。鳥には触れられる） */
+let manualCam = null;
+const camEdit = document.getElementById('camEdit'), camEditBtn = document.getElementById('camEditBtn');
+const camPos = document.getElementById('camPos'), camTgt = document.getElementById('camTgt'), camFov = document.getElementById('camFov');
+function fillCamInputs(c){ camPos.value = c.pos.join(', '); camTgt.value = c.target.join(', '); camFov.value = c.fov; }
+camEditBtn.addEventListener('click', ()=>{
+  camEdit.hidden = !camEdit.hidden; camEditBtn.setAttribute('aria-pressed', String(!camEdit.hidden));
+  if(!camEdit.hidden) fillCamInputs(cameraSpec());
+});
+function applyCamInputs(){
+  try{
+    if(camPos.value.trim().startsWith('{')) fillCamInputs(JSON.parse(camPos.value));
+    const v3 = str=>{ const a = String(str).split(/[\s,]+/).filter(Boolean).map(Number); if(a.length !== 3 || !a.every(Number.isFinite)) throw 0; return new THREE.Vector3(...a); };
+    const pos = v3(camPos.value), target = v3(camTgt.value), fov = parseFloat(camFov.value);
+    if(!(fov >= 1 && fov <= 150) || pos.distanceTo(target) < 1e-4) throw 0;
+    manualCam = { pos, target, fov };
+    camLabelT = 0;
+  }catch(err){ camLabel.textContent = '数値が読めない\n位置・注視は「x, y, z」、画角は 1〜150'; camLabelT = performance.now() + 2000; }
+}
+document.getElementById('camApply').addEventListener('click', applyCamInputs);
+[camPos, camTgt, camFov].forEach(el=>el.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); applyCamInputs(); } }));
+document.getElementById('camFree').addEventListener('click', ()=>{ manualCam = null; resize(); camLabelT = 0; });   // resize で画角を画面の向きの既定に戻す
 let camLabelT = 0;
 function refreshDebug(){
   if(!dbg.classList.contains('on')) return;
-  if(performance.now() - camLabelT > 250){ camLabelT = performance.now(); const c = cameraSpec(); camLabel.textContent = `位置 ${c.pos.join(', ')}\n注視 ${c.target.join(', ')}\n画角 ${c.fov}°`; }
+  if(performance.now() - camLabelT > 250){ camLabelT = performance.now(); const c = cameraSpec(); camLabel.textContent = `位置 ${c.pos.join(', ')}\n注視 ${c.target.join(', ')}\n画角 ${c.fov}°` + (manualCam ? '（手入力で固定中）' : ''); }
   const h = Math.floor(dayT*24), mnt = Math.floor((dayT*24 - h)*60);
   tLabel.textContent = `${curName} ${String(h).padStart(2,'0')}:${String(mnt).padStart(2,'0')}  月${(moonPhase*100).toFixed(0)}%`;
   if(document.activeElement !== tSlider) tSlider.value = Math.round(dayT*1000);
@@ -2823,6 +2859,7 @@ canvas.addEventListener('pointerdown', e=>{
 canvas.addEventListener('pointermove', e=>{
   const p = pointers.get(e.pointerId);
   if(!p) return;
+  if(manualCam){ p.x = e.clientX; p.y = e.clientY; return; }   // 手入力の画角で固定中
   if(pointers.size === 1){
     if(p.pan) panBy(e.clientX - p.x, e.clientY - p.y);
     else { ORBIT.az -= (e.clientX - p.x)*.005; ORBIT.el += (e.clientY - p.y)*.004; }
@@ -2849,6 +2886,7 @@ canvas.addEventListener('mousedown', e=>{ if(e.button === 1) e.preventDefault();
 let wheelKind = 'pad', lastWheelT = 0;
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
+  if(manualCam) return;
   const now = performance.now();
   const padLike = e.deltaMode === 0 && (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50);
   if(now - lastWheelT > 200) wheelKind = padLike ? 'pad' : 'mouse';
@@ -3060,9 +3098,10 @@ function stepFrame(dt, now, noRender){
   camera.position.y = THREE.MathUtils.clamp(camera.position.y, ROOM_FLOOR + .3, ROOM_CEIL - .3);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, .25, ROOM_D - .3);
   camera.lookAt(LOOK);
-  if(CAPTURE && CAP.cam){   // 撮影：画角を数値で直接与える
-    camera.position.copy(CAP.cam.pos); LOOK.copy(CAP.cam.target);
-    camera.fov = CAP.cam.fov; camera.updateProjectionMatrix(); camera.lookAt(LOOK);
+  const fixedCam = CAPTURE ? CAP.cam : manualCam;   // 撮影、またはデバッグの手入力：画角を数値で直接与える
+  if(fixedCam){
+    camera.position.copy(fixedCam.pos); LOOK.copy(fixedCam.target);
+    camera.fov = fixedCam.fov; camera.updateProjectionMatrix(); camera.lookAt(LOOK);
   }
 
   sky.position.copy(camera.position);
