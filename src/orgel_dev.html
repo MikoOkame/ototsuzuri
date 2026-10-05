@@ -2505,7 +2505,9 @@ function birdsUpdate(dt){
     if(want && b.mode === 'away'){
       if(b.needDraw || b.loading){ if(!b.loading) assignBird(b); continue; }   // 顔ぶれを決めてテクスチャが届くまで待つ
       if(b.arriveAt < 0){ b.arriveAt = clock + stagger + Math.random()*1.2; stagger += 1.1 + Math.random()*.9; }
-      if(clock >= b.arriveAt) beginArrive(b);
+      // 撮影で飛来の秒を指定した鳥は、その秒ちょうどに来る（他の鳥とのずらしは使わない）
+      const capHold = CAPTURE && CAP.hold && CAP.hold[b.idx] != null ? CAP.hold[b.idx] : null;
+      if(capHold != null ? CAP.rec && CAP.time >= capHold : clock >= b.arriveAt) beginArrive(b);
     } else if(!want && b.mode !== 'away' && !(b.mode === 'fly' && b.fl.dir < 0)){
       if(b.leaveAt < 0){ b.leaveAt = clock + stagger + Math.random()*.8; stagger += 1.1 + Math.random()*.9; }
       if(clock >= b.leaveAt){ b.leaveAt = -1; beginLeave(b); }
@@ -3010,11 +3012,30 @@ const fpsMeter = (()=>{
    ・曲は鳴らさず、曲の位置だけをコマに合わせて進める。音はあとでオフラインで同じ時間軸に書き出す
    ・鳥の声は撮影中に起きた時刻を記録しておき、音の書き出しで同じ時刻に鳴らす
 ================================================================ */
-const CAP = { cam:null, time:0, rec:false, chirps:[], offline:false, playing:false, pos0:0, daySpeed:0 };
+const CAP = { cam:null, time:0, rec:false, chirps:[], offline:false, playing:false, pos0:0, daySpeed:0, hold:null, day0:0 };
 if(CAPTURE){
   document.body.classList.add('capturing');
   const V = a=>new THREE.Vector3(...a);
   const ease = t=>t*t*(3 - 2*t);   // 端でゆっくり、中で速い
+  /* 単調な3次補間（Fritsch–Carlson）。キーの間で行き過ぎたり戻ったりしない */
+  function smoothKeys(K, t){
+    const n = K.length;
+    if(t <= K[0][0]) return K[0][1];
+    if(t >= K[n-1][0]) return K[n-1][1];
+    const d = [], m = [];
+    for(let i=0;i<n-1;i++) d.push((K[i+1][1] - K[i][1])/(K[i+1][0] - K[i][0]));
+    m.push(d[0]);
+    for(let i=1;i<n-1;i++) m.push(d[i-1]*d[i] <= 0 ? 0 : (d[i-1] + d[i])/2);
+    m.push(d[n-2]);
+    for(let i=0;i<n-1;i++){
+      if(d[i] === 0){ m[i] = m[i+1] = 0; continue; }
+      const a = m[i]/d[i], b = m[i+1]/d[i], h = a*a + b*b;
+      if(h > 9){ const r = 3/Math.sqrt(h); m[i] = r*a*d[i]; m[i+1] = r*b*d[i]; }
+    }
+    let i = 0; while(t > K[i+1][0]) i++;
+    const h = K[i+1][0] - K[i][0], u = (t - K[i][0])/h, u2 = u*u, u3 = u2*u;
+    return (2*u3 - 3*u2 + 1)*K[i][1] + (u3 - 2*u2 + u)*h*m[i] + (-2*u3 + 3*u2)*K[i+1][1] + (u3 - u2)*h*m[i+1];
+  }
   CAP.advance = dt=>{
     CAP.time += dt;
     if(CAP.daySpeed){ dayT += dt*CAP.daySpeed; if(dayT >= 1){ dayT -= 1; dayCount++; } }
@@ -3024,7 +3045,12 @@ if(CAPTURE){
     ready:()=>birds.length > 0 && birds.every(b=>b.mode !== 'fly' && !b.loading),
     // 撮る前の準備：時刻・曲・鳥を決め、warmup 秒だけ（曲を止めたまま）進めて落ち着かせる
     setup:cfg=>{
-      timeSpeed = 0; dayT = cfg.dayT; CAP.daySpeed = 0;   // 準備の間は時刻を止める（撮影の 0 秒が cfg.dayT になるように）
+      timeSpeed = 0; dayT = cfg.dayKeys ? cfg.dayKeys[0][1] % 1 : cfg.dayT; CAP.daySpeed = 0;
+      CAP.hold = cfg.birdArrive || null;   // 鳥ごとの「飛来を始めてよい撮影の秒」。準備の間は全員待たせる
+      // 飛来の秒を指定した鳥は、居なかったことにして始める（?birds だと開いた時点で止まり木に居るため）
+      if(CAP.hold) for(const b of birds) if(CAP.hold[b.idx] != null){
+        b.mode = 'away'; b.model.visible = false; b.arriveAt = -1; b.leaveAt = -1; b.singing = false; b.seated = false;
+      }   // 準備の間は時刻を止める（撮影の 0 秒が cfg.dayT になるように）
       const idx = Math.max(0, TRACKS.findIndex(t=>t.id === cfg.track));
       currentTrackIdx = idx; song.track = TRACKS[idx]; orgel.setTrack(song.track);
       song.pos = 0; song.speed = 1; song.started = false; isPlaying = false; CAP.playing = false;
@@ -3035,13 +3061,16 @@ if(CAPTURE){
     },
     // 撮影開始：曲を頭から（曲の位置 0）。ここからの時刻が動画の 0 秒
     start:cfg=>{
-      CAP.time = 0; CAP.rec = true; CAP.chirps = []; CAP.daySpeed = cfg.daySeconds ? 1/cfg.daySeconds : 0;
+      CAP.time = 0; CAP.rec = true; CAP.chirps = []; CAP.daySpeed = cfg.dayKeys ? 0 : cfg.daySeconds ? 1/cfg.daySeconds : 0;
+      CAP.day0 = dayCount;
       if(cfg.play){ song.pos = 0; song.started = true; isPlaying = true; CAP.playing = true; }
       window.__cap.pose(cfg, 0); renderer.render(scene, camera);
     },
     // 画角：keys（[{t, pos, target, fov}…]、時刻順）があれば隣り合う画角の間を滑らかに移る（同じ画角を続けると留まる）。
     // 無ければ camA → camB を move の間に移る
     pose:(cfg, t)=>{
+      // 時刻：dayKeys（[秒, 時刻]…。時刻は 1 を越えて翌日へ続けてよい）があれば、その間を滑らかに（速さが急に変わらないように）つなぐ
+      if(cfg.dayKeys){ const v = smoothKeys(cfg.dayKeys, t); dayT = v - Math.floor(v); dayCount = CAP.day0 + Math.floor(v); }
       let a, b, k;
       if(cfg.keys){
         const K = cfg.keys; let i = 0;

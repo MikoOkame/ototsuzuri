@@ -54,6 +54,7 @@ async function still(name, shot, cfg, t) {
 for (const name of names) {
   const shot = cfgAll.shots[name]; if (!shot) throw new Error('shots.json に無い: ' + name);
   const cfg = { ...shot, fps: cfgAll.fps };
+  if (shot.dayKeys && shot.dayT == null) shot.dayT = shot.dayKeys[0][1] % 1;   // 開くときの時刻
   // 画角は名前（cams の A・B・C…）でも書ける。keys は [秒, 名前] の並び
   const cam = c => typeof c === 'string' ? cfgAll.cams[c] : c;
   if (shot.keys) { cfg.keys = shot.keys.map(([t, c]) => ({ t, ...cam(c) })); cfg.camA = cfg.keys[0]; }
