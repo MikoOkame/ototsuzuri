@@ -350,6 +350,7 @@ const interior = [];
 function inToon(color, extra){
   const m = toon(color, extra);
   interior.push({ m, base:new THREE.Color(color) });
+  m.userData.base = interior[interior.length - 1].base;
   return m;
 }
 /* 時間帯の色をそのまま持つ素材 */
@@ -443,6 +444,9 @@ scene.add(sillFill);
    だから光源は置かず、箱の中の素材（boxInside）にだけ自分の色の発光を足して起こす。?boxlight=0 で無し */
 const boxInside = [];
 const BOX_LIFT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxi') ? parseFloat(PARAMS.get('boxi')) : .35;   // 強さ（調整用に ?boxi=）
+// 夜（部屋の灯りも消えた後）は暗く沈んだ色に掛けても上がらないので、元の色に掛けて足す（調整用に ?boxn=）
+const BOX_NIGHT = PARAMS.get('boxlight') === '0' ? 0 : PARAMS.has('boxn') ? parseFloat(PARAMS.get('boxn')) : .07;
+const _boxC = new THREE.Color();
 
 /* ================================================================
    空：グラデーションのドーム＋ノイズの滲み。カメラに追従する。
@@ -1706,7 +1710,7 @@ const orgel = (()=>{
   click.rotation.y = .5;
 
   /* 仮の箱（ユーザーの .glb が届いたら差し替える） */
-  const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xbca6c8);
+  const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xa6c0c8);
   const boxRoot = new THREE.Group(); orgelRoot.add(boxRoot);
   const IW = 6.1, ID = 5.0, WT = .5, WH = 5.4;
   // 内張り：形はそのまま、箱の内側を向く面だけ蓋裏と同じ布の色にする（?lining=0 で無し）。面の順は +x,-x,+y,-y,+z,-z
@@ -1752,8 +1756,31 @@ const orgel = (()=>{
 
   /* ---- 曲ごとに作る部分：櫛歯とピン ---- */
   const PIN_BASE = new THREE.Color(0xc3c9d6), PIN_HOT = new THREE.Color(0xffd894), _pc = new THREE.Color();
+  /* 弾いたピンの目立たせ方（?pinfx=0〜3 で比較）。0：色が淡い黄に変わるだけ（元）
+     1：光る金色（色の 1 を超えた分を発光として足す。暗い時間帯でも光る）
+     2：1＋光っている間ピンが膨らむ  3：2＋光っているピンの周りに光の暈（かさ） */
+  const PIN_FX = PARAMS.has('pinfx') ? parseInt(PARAMS.get('pinfx')) : 3;
+  const PIN_GLOW = PARAMS.has('pinc') ? new THREE.Color(...PARAMS.get('pinc').split(',').map(Number)) : new THREE.Color(2.4, 1.75, .55);   // 線形色。1 を超えた分が発光（調整用に ?pinc=r,g,b）
+  const PIN_TRAIL = PARAMS.has('pinw') ? parseFloat(PARAMS.get('pinw')) : 1.8;   // 弾いた後に光が残る回転角（rad）
   const pinGeo = new THREE.CylinderGeometry(.05, .05, .26, 6);
   const pinMat = toon(0xffffff);
+  pinMat.onBeforeCompile = sh=>{
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <color_fragment>', `vec3 pinGlow = vec3(0.0);
+#if defined( USE_COLOR )
+  diffuseColor.rgb *= min(vColor, vec3(1.0));
+  pinGlow = max(vColor - 1.0, 0.0);
+#endif`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pinGlow;');
+  };
+  // 光の暈（ピンの先。加算合成なので色が黒の所は見えない）
+  const haloTex = (()=>{ const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.25, 'rgba(255,240,200,.85)'); gr.addColorStop(1, 'rgba(255,220,150,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const haloMat = new THREE.PointsMaterial({ size:.014, map:haloTex, vertexColors:true, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+  const HALO_COL = new THREE.Color(PIN_GLOW.r, PIN_GLOW.g, PIN_GLOW.b).multiplyScalar(.45/Math.max(PIN_GLOW.r, PIN_GLOW.g, PIN_GLOW.b));
+  let halos = null;
   let pins = null, teeth = [], notes = [], pitches = [], loopSec = 30, toothX = ()=>0;
   const combGroup = new THREE.Group(); mech.add(combGroup);
   function setTrack(track){
@@ -1793,10 +1820,20 @@ const orgel = (()=>{
       P.set(toothX(nt.tooth), Math.sin(nt.psi)*rr, Math.cos(nt.psi)*rr);
       Qq.setFromEuler(E.set(Math.PI/2 - nt.psi, 0, 0));
       Mm.compose(P, Qq, S1); pins.setMatrixAt(i, Mm);
+      nt.P = P.clone(); nt.Q = Qq.clone();
       pins.setColorAt(i, PIN_BASE);
     });
     pins.instanceMatrix.needsUpdate = true;
     cyl.add(pins);
+    if(halos){ cyl.remove(halos); halos.geometry.dispose(); halos = null; }
+    if(PIN_FX >= 3){
+      const hp = new Float32Array(notes.length*3), rr = R + .2;
+      notes.forEach((nt, i)=>{ hp[i*3] = toothX(nt.tooth); hp[i*3+1] = Math.sin(nt.psi)*rr; hp[i*3+2] = Math.cos(nt.psi)*rr; });
+      const hg = new THREE.BufferGeometry();
+      hg.setAttribute('position', new THREE.BufferAttribute(hp, 3));
+      hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(notes.length*3), 3));
+      halos = new THREE.Points(hg, haloMat); halos.name = 'PinHalos'; halos.renderOrder = 2; cyl.add(halos);
+    }
     lastPos = 0;
   }
 
@@ -1809,6 +1846,7 @@ const orgel = (()=>{
 
   /* ---- 毎フレーム：song.pos から回転と弾きを出す ---- */
   let lastPos = 0;
+  const _pm = new THREE.Matrix4(), _ps = new THREE.Vector3();
   const struck = [];   // このフレームで弾いた歯（音符の発生に使う）
   function update(dt){
     const pos = song.started ? song.pos : lastPos;
@@ -1829,13 +1867,26 @@ const orgel = (()=>{
     fan.rotation.x = -w2*(.8/.3)*5;
     barrel.rotation.y = -ang*.4;
     if(pins){
+      const act = PIN_FX >= 1 ? (song.started && isPlaying ? Math.min(1, song.speed) : 0) : 1;   // 止まっている間は光らせない
       for(let i=0;i<notes.length;i++){
-        let w = notes[i].psi + ang;
+        const nt = notes[i];
+        let w = nt.psi + ang;
         w = Math.atan2(Math.sin(w), Math.cos(w));
-        const hot = w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0;
-        pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_HOT, hot));
+        // 0：歯に近づくピンを染める（元）。1 以上：弾いた後も光を残し、見える円筒の上側へ回る間に消えていく
+        //（櫛は箱の前の壁に隠れて、弾く瞬間はほとんどの画角で見えないため）
+        const hot = (PIN_FX >= 1
+          ? (w > -.25 && w < 0 ? Math.pow(1 + w/.25, 2) : w >= 0 && w < PIN_TRAIL ? Math.pow(1 - w/PIN_TRAIL, 1.5) : 0)
+          : (w > -.5 && w < .06 ? Math.pow(1 - Math.abs(w + .05)/.55, 2) : 0))*act;
+        pins.setColorAt(i, _pc.copy(PIN_BASE).lerp(PIN_FX >= 1 ? PIN_GLOW : PIN_HOT, hot));
+        if(halos){ const ca = halos.geometry.attributes.color.array; ca[i*3] = HALO_COL.r*hot; ca[i*3+1] = HALO_COL.g*hot; ca[i*3+2] = HALO_COL.b*hot; }
+        if(PIN_FX >= 2 && (hot > 0 || nt.big)){
+          nt.big = hot > 0;
+          _pm.compose(nt.P, nt.Q, _ps.setScalar(1 + .8*hot)); pins.setMatrixAt(i, _pm);
+          pins.instanceMatrix.needsUpdate = true;
+        }
       }
       pins.instanceColor.needsUpdate = true;
+      if(halos) halos.geometry.attributes.color.needsUpdate = true;
     }
     for(const t of teeth){
       t.age += dt;
@@ -1851,7 +1902,10 @@ const orgel = (()=>{
   fan.children.forEach((c, i)=>{ if(c.isMesh) c.name = i === 0 ? 'Fan_Hub' : 'Fan_Blade_' + i; });
   setTrack(TRACKS[0]);
   return { update, setTrack, tipWorld, struck, get teeth(){ return teeth; },
-    exportParts:()=>({ cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE }) };
+    exportParts:()=>{
+      if(pins) notes.forEach((nt, i)=>{ _pm.compose(nt.P, nt.Q, _ps.setScalar(1)); pins.setMatrixAt(i, _pm); nt.big = false; });
+      return { cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE };
+    } };
 })();
 
 /* ---------- ベランダ ---------- */
@@ -2657,7 +2711,8 @@ function applyTime(t){
   tinted.forEach(o=>o.m.color.copy(p[o.key]));
   interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
   const lift = BOX_LIFT*(sunUp*.5 + .5 + room);   // 昼は外光、夜は部屋の灯りの照り返し
-  boxInside.forEach(m=>m.emissive.copy(m.color).multiplyScalar(lift));
+  const boxNight = BOX_NIGHT*(1 - sunUp)*(1 - room);
+  boxInside.forEach(m=>m.emissive.copy(m.color).multiplyScalar(lift).add(_boxC.copy(m.userData.base).multiplyScalar(boxNight)));
   clouds.forEach(c=>c.material.color.copy(p.cloud));
 
   paintWindows(p, litFrac(t), false);
@@ -2812,7 +2867,7 @@ if(PARAMS.has('export')){
     const P = orgel.exportParts();
     const baseOf = new Map(interior.map(o=>[o.m, o.base]));
     const NAMES = { 0xa98549:'Brass', 0x7f6038:'Brass_Dark', 0xb6b8bb:'Steel', 0x7a7c80:'Steel_Dark', 0x55535c:'Lead',
-                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xbca6c8:'Lining', 0xeef3f7:'Mirror', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
+                    0x6f4a3c:'Wood', 0x533427:'Wood_Dark', 0xd6bd96:'Inlay', 0xa6c0c8:'Lining', 0xeef3f7:'Mirror', 0x4a3346:'Keyhole', 0xc3c9d6:'Pin' };
     const mats = new Map();
     const matFor = (m, hexOverride)=>{
       const c = hexOverride !== undefined ? new THREE.Color(hexOverride) : (baseOf.get(m) || m.color);
@@ -2828,7 +2883,7 @@ if(PARAMS.has('export')){
     orgelRoot.updateMatrixWorld(true);
     const counter = {};
     function copy(src, parentName){
-      if(src.isLight) return null;
+      if(src.isLight || src.isPoints) return null;
       if(src.isMesh && !Array.isArray(src.material) && isOutline(src.material)) return null;
       let node;
       if(src.isInstancedMesh){
