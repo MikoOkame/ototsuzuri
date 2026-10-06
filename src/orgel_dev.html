@@ -162,7 +162,7 @@
     <label>画角<input id="camFov" inputmode="decimal" autocomplete="off" class="short"></label>
     <button id="camApply">適用</button><button id="camFree">解除</button>
   </div>
-  <div class="row"><span id="inLabel">入力：（ホイールやボタンを使うとここに出る）</span></div>
+  <div class="row"><span id="inLabel">入力：（ホイールやボタンを使うとここに出る）</span><button id="inClear">入力を消す</button></div>
   <div class="row">
     <span>速さ</span>
     <button data-speed="0">停止</button><button data-speed="1">×1</button><button data-speed="10">×10</button><button data-speed="60">×60</button>
@@ -2913,6 +2913,7 @@ function logInput(txt){
   inLabel.textContent = '入力：\n' + inLog.join('\n');
 }
 const r2 = v=>Math.round(v*100)/100;
+document.getElementById('inClear').addEventListener('click', ()=>{ inLog.length = 0; inLabel.textContent = '入力：（ホイールやボタンを使うとここに出る）'; });
 canvas.addEventListener('wheel', e=>{
   e.preventDefault();
   if(manualCam) return;
