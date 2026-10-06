@@ -2897,9 +2897,13 @@ canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('contextmenu', e=>e.preventDefault());    // 右ドラッグの邪魔をさせない
 canvas.addEventListener('mousedown', e=>{ if(e.button !== 0) logInput(`mousedown button=${e.button} buttons=${e.buttons}`); if(e.button === 1) e.preventDefault(); });   // 中ボタンの自動スクロールを出さない
 /* ホイール：マウスのホイールは寄る・引く、トラックパッドの2本指スクロールは平行移動。
-   ブラウザからはどちらも wheel なので値の形で見分ける。ホイールは行単位か、横が 0 で縦が大きな整数で来る。
+   ブラウザからはどちらも wheel なので値の形で見分ける。マウスのホイールとみなすのは次のどれか：
+   ・行単位（deltaMode が 0 以外。Firefox のホイール）
+   ・横が 0 で、wheelDeltaY が 120 の倍数（Chrome 系のホイールの1目盛り。表示倍率に左右されない）
+   ・横が 0 で、縦がほぼ整数かつ 50 以上（wheelDeltaY の無いブラウザ向け。Windows の表示倍率では
+     deltaY が -100.0000015 のような値で来るので、ちょうどの整数では判定しない）
    トラックパッドは小さい値・小数・横成分が混じる。一連の動き（間が 200ms 未満）の途中では判定を変えない
-   （ただしトラックパッドらしい値が来たらそちらに倒す）。見分けを誤ると平行移動になる（以前の動き） */
+   （ただしトラックパッドらしい値が来たらそちらに倒す）。見分けを誤ると平行移動になる */
 let wheelKind = 'pad', lastWheelT = 0;
 // デバッグ表示：届いた入力の生の値と、どう扱ったかを直近6件出す（マウスの機種ごとの違いを調べるため）
 const inLabel = document.getElementById('inLabel'), inLog = [];
@@ -2913,11 +2917,14 @@ canvas.addEventListener('wheel', e=>{
   e.preventDefault();
   if(manualCam) return;
   const now = performance.now();
-  const padLike = e.deltaMode === 0 && (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50);
+  const wdy = e.wheelDeltaY;
+  const notch = typeof wdy === 'number' && wdy !== 0 ? wdy % 120 === 0
+    : Math.abs(e.deltaY) >= 50 && Math.abs(e.deltaY - Math.round(e.deltaY)) < .01;
+  const padLike = e.deltaMode === 0 && (e.deltaX !== 0 || !notch);
   if(now - lastWheelT > 200) wheelKind = padLike ? 'pad' : 'mouse';
   else if(padLike) wheelKind = 'pad';
   lastWheelT = now;
-  logInput(`wheel mode=${e.deltaMode} dx=${r2(e.deltaX)} dy=${r2(e.deltaY)} wdy=${e.wheelDeltaY ?? '-'} ctrl=${e.ctrlKey ? 1 : 0} → ${e.ctrlKey ? 'ピンチ拡縮' : wheelKind === 'mouse' ? '拡縮' : '移動'}`);
+  logInput(`wheel mode=${e.deltaMode} dx=${r2(e.deltaX)} dy=${e.deltaY} wdy=${e.wheelDeltaY ?? '-'} ctrl=${e.ctrlKey ? 1 : 0} → ${e.ctrlKey ? 'ピンチ拡縮' : wheelKind === 'mouse' ? '拡縮' : '移動'}`);
   if(e.ctrlKey) ORBIT.dist *= 1 + e.deltaY*.01;           // トラックパッドのピンチ
   else if(wheelKind === 'mouse'){                          // マウスのホイール：1目盛り（100px）で約 16%
     const dy = e.deltaMode === 1 ? e.deltaY*33 : e.deltaMode === 2 ? e.deltaY*400 : e.deltaY;
