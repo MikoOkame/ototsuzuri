@@ -138,7 +138,7 @@
     <button class="transportBtn" id="nextBtn" aria-label="次の曲">⏭</button>
   </div>
   <div id="subRow">
-    <button id="modeBtn">🔂 1曲</button>
+    <button id="modeBtn">🔁 全曲</button>
     <button id="birdBtn" aria-pressed="true">🐦 声</button>
     <button id="muteBtn" aria-label="消音">🔊</button>
     <input type="range" id="volSlider" min="0" max="100" value="55" aria-label="音量">
@@ -1149,7 +1149,7 @@ let activeNodes = [];
 let playGeneration = 0;
 let bgmLoopTimer = null;
 let currentTrackIdx = 0;
-let playMode = 'single';   // 'single' | 'all' | 'shuffle'
+let playMode = CAPTURE ? 'single' : 'all';   // 'single' | 'all' | 'shuffle'。開いたときは全曲リピート（撮影は1曲：音の書き出しが1曲のループ前提のため）
 const FIXED_ORDER_IDS = ['hajimari00','waltz01','umiwatari01','yamagoe02','arashi03','clear'];
 let isPlaying = false;
 
