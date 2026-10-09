@@ -2364,14 +2364,18 @@ function voice(b, style, vol, withSound=true){
   emitNote(beakPos(b, _beak), midi, BIRD_NOTE*(style ? .7 : 1));
 }
 
-/* ---- 拍への同期：2拍で sing／sing_hop の1周。曲送りで拍が飛んでも位相をなめらかに寄せる ---- */
+/* ---- 拍への同期：2拍で sing／sing_hop の1周 ----
+   ずれは「拍（半周）単位でいちばん近い所」に寄せ、寄せる速さも普段の ±15% までにする。
+   以前は1周単位で寄せていたので、1周の拍数が奇数の曲（はじまりのワルツ 51拍・あたらしいそらへ 43拍）は
+   ループの頭で目標が半周飛び、動きがほぼ止まってから2秒かけて戻っていた（小節の区切りでカクつく）。曲送りでも同じ */
 function targetPhase(){ return ((song.pos*song.track.bpm/60)/2) % 1; }
 function syncSingPhase(b, dt){
   const act = b.current, clip = b.clips[b.anim];
   if(!act || !clip) return;
-  const tgt = targetPhase();
-  const diff = ((tgt - b.singPhase + 1.5) % 1) - .5;
-  b.singPhase = (b.singPhase + dt*song.track.bpm/120*song.speed + diff*Math.min(1, dt*1.5) + 1) % 1;
+  const base = song.track.bpm/120*song.speed;
+  const diff = (((targetPhase() - b.singPhase + .75) % .5) + .5) % .5 - .25;   // -0.25〜0.25 周
+  const corr = THREE.MathUtils.clamp(diff*1.5, -.15*base, .15*base);
+  b.singPhase = (b.singPhase + dt*(base + corr) + 1) % 1;
   act.time = b.singPhase*clip.duration;
 }
 
