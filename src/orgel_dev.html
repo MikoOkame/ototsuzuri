@@ -2332,6 +2332,10 @@ function setAnim(b, name, loop=true, fade=.25, force=false){
 /* ---- 歌の開始と停止 ---- */
 function startSing(b, fade=SING_FADE){
   if(b.singing) return;
+  if(b.mode === 'fly' || b.mode === 'away') return;
+  // ホバリング中（降りている途中を含む）は位置の動きを止めない。歌う印だけ付け、降りきったら歌に入る
+  //（以前は mode を sing に替えてしまい、降りる途中で触れると宙に浮いたまま歌い続けた）
+  if(b.mode === 'hover'){ b.singing = true; b.singOrder = ++singOrderCtr; b.singBeat = -1; return; }
   const now = singingBirds();
   if(now.length >= MAX_SINGERS){   // 最初に歌い出した鳥がやめる
     const first = now.reduce((a, c)=>c.singOrder < a.singOrder ? c : a);
@@ -2467,7 +2471,7 @@ function enterPerch(b){
 function beginHover(b){
   b.mode = 'hover';
   const h = b.home.pos;
-  b.hv = { phase:'rise', t:0, bars:2 + Math.floor(Math.random()*3), from:h.clone(),
+  b.hv = { phase:'rise', t:0, bars:2 + Math.floor(Math.random()*3), from:b.model.position.clone(),   // 今居る所から（定位置から決め打ちにすると、ずれていたとき瞬間移動する）
            to:new THREE.Vector3(h.x*.7, RAIL_TOP + .5, RAIL_Z + .5) };
   setAnim(b, 'hover', true, .3, true);
 }
@@ -2614,6 +2618,8 @@ function birdsUpdate(dt){
     if(b.mode === 'fly'){ updateFlight(b, dt); continue; }
     if(b.mode === 'hover') updateHover(b, dt, barTick);
     if(b.mode === 'perch') perchIdle(b, dt);
+    // 止まり木・歌っている間は定位置に居るはず。万一ずれていたら（宙に浮いたまま等）なめらかに戻す
+    if((b.mode === 'perch' || b.mode === 'sing') && b.model.position.distanceToSquared(b.home.pos) > 1e-4) b.model.position.lerp(b.home.pos, Math.min(1, dt*2.5));
     if(b.singing){
       if(b.mode === 'sing') syncSingPhase(b, dt);
       // 拍ごとに声。鳥ごとに2拍に1回、鳥の番号でずらして重なりすぎないようにする
