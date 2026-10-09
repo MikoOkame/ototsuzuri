@@ -1535,7 +1535,7 @@ function playTrack(idx, gapSec){
 }
 function togglePlay(){
   if(isPlaying){ stopAllAudio(); return; }
-  if(springOut){ rewindSpring(); playTrack(currentTrackIdx, .75); return; }   // 切れた後：巻き直す音を聞かせてから鳴らす
+  if(springOut){ const d = rewindSpring(); playTrack(currentTrackIdx, Math.max(.3, d + .15)); return; }   // 切れた後：巻き直す音を聞かせてから鳴らす
   playTrack(currentTrackIdx);
 }
 function nextTrack(){ playTrack((currentTrackIdx+1) % TRACKS.length); }
@@ -1566,7 +1566,7 @@ function setSpring(idx){
   updateSpringBtn();
 }
 function cycleSpring(){ setSpring((springIdx + 1) % SPRING_STEPS.length); }
-function rewindSpring(){ springOut = false; springLeft = SPRING_STEPS[springIdx]; windSfx(); springKeySpin += Math.PI*2*.75; updateSpringBtn(); }
+function rewindSpring(){ springOut = false; springLeft = SPRING_STEPS[springIdx]; const d = windSfx(2); springKeySpin += Math.PI*2*1.5; updateSpringBtn(); return d; }   // 切れた後はしっかり2回巻く。鳴り終わるまでの秒を返す
 function springLeftNow(){ return isFinite(springEndAt) && audioCtx ? Math.max(0, springEndAt - audioCtx.currentTime) : springLeft; }
 function updateSpringBtn(){
   const b = document.getElementById('springBtn'); if(!b) return;
@@ -1574,19 +1574,53 @@ function updateSpringBtn(){
   const txt = !isFinite(left) ? '🗝 ∞' : springOut ? '🗝 0分' : '🗝 ' + Math.max(1, Math.ceil(left/60)) + '分';
   if(b.textContent !== txt){ b.textContent = txt; b.setAttribute('aria-label', 'ゼンマイ ' + (isFinite(left) ? '残り' + Math.max(1, Math.ceil(left/60)) + '分' : '巻きっぱなし')); }
 }
-// 巻く音：ラチェットのカリカリ（短い四角波の粒を 7 回）。効果音の経路に流す
-function windSfx(){
-  const ctx = ensureAudioCtx(); if(!ctx) return;
+/* 巻く音：ラチェットの爪が歯を乗り越えて落ちる「カチッ」。音程のない衝撃音なので、雑音の粒で作る（オシレーターだとピコピコになる）。
+   ・雑音（1つ作って使い回す）を 4〜15ms だけ、鋭く立ち上げて急に減衰
+   ・金属の硬さ：2〜5kHz を狭すぎない帯域（Q 1.4〜2.2）で通す。Q を上げすぎると音程が出る
+   ・木箱の「コッ」：同じ粒を 200〜800Hz の共鳴にも通して少しだけ混ぜる
+   ・人の手のリズム：つまんで回す（5〜7 回、間隔と強さを揺らす）→ 持ち替える（間）→ …。巻き進むほど回す速さが落ち、硬く強くなる
+   ・最後は止まる手応え（少し間をおいて、低めの強い一打）
+   ・粒ごとに中心周波数と音量を少し変える。鳴らし終えたノードは ended で切断（連打しても溜まらない。windSfxLive で数を見る） */
+let windNoiseBuf = null, windSfxLive = 0;
+function windNoise(ctx){
+  if(windNoiseBuf && windNoiseBuf.sampleRate === ctx.sampleRate) return windNoiseBuf;
+  const n = Math.round(ctx.sampleRate*.06), b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = Math.random()*2 - 1;
+  return windNoiseBuf = b;
+}
+function windClick(ctx, dest, t, hard, vol, low){
+  const src = ctx.createBufferSource(); src.buffer = windNoise(ctx); src.playbackRate.value = .9 + Math.random()*.2;
+  const dur = low ? .022 : .004 + Math.random()*.008 + (1 - hard)*.003;   // 4〜15ms（止まる手応えは少し長い）
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(.0001, t); env.gain.exponentialRampToValueAtTime(vol, t + .0008); env.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  const hi = ctx.createBiquadFilter(); hi.type = 'bandpass';
+  hi.frequency.value = (low ? 1800 : 2300 + 1900*hard) + (Math.random() - .5)*600; hi.Q.value = 1.4 + Math.random()*.8;
+  const lo = ctx.createBiquadFilter(); lo.type = 'bandpass'; lo.frequency.value = low ? 230 : 260 + Math.random()*480; lo.Q.value = 3.5;
+  const loG = ctx.createGain(); loG.gain.value = low ? .9 : .32;
+  src.connect(env); env.connect(hi); env.connect(lo); lo.connect(loG); hi.connect(dest); loG.connect(dest);
+  src.start(t, Math.random()*.03, dur + .012); windSfxLive++;
+  src.addEventListener('ended', ()=>{ windSfxLive--; src.disconnect(); env.disconnect(); hi.disconnect(); lo.disconnect(); loG.disconnect(); });
+}
+function windPattern(ctx, dest, t0, grips){   // 鳴り終わりの時刻を返す
+  let t = t0, k = 0; const total = grips*6;
+  for(let g=0; g<grips; g++){
+    const n = 5 + Math.floor(Math.random()*3), iv = .068 + Math.random()*.014;
+    for(let i=0;i<n;i++){
+      const prog = Math.min(1, k/total);
+      windClick(ctx, dest, t, prog, (.34 + .26*prog)*(.8 + Math.random()*.4)); k++;
+      t += iv*(1 + prog*.7)*(.82 + Math.random()*.36);
+    }
+    if(g < grips - 1) t += .17 + Math.random()*.13;   // 持ち替え
+  }
+  t += .07 + Math.random()*.03;
+  windClick(ctx, dest, t, .5, grips > 1 ? .8 : .55, true);   // 止まる手応え
+  return t + .03;
+}
+function windSfx(grips=1){
+  const ctx = ensureAudioCtx(); if(!ctx) return 0;
   if(ctx.state === 'suspended') ctx.resume();
   ensureSfx();
-  const t0 = ctx.currentTime + .02;
-  for(let i=0;i<7;i++){
-    const t = t0 + i*.085 + Math.random()*.012;
-    const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 1700 + Math.random()*700;
-    const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.09, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .03);
-    o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + .04);
-    o.addEventListener('ended', ()=>g.disconnect());
-  }
+  return windPattern(ctx, sfxGain, ctx.currentTime + .03, grips) - ctx.currentTime;
 }
 setInterval(()=>{ springCheck(); updateSpringBtn(); }, 1000);
 function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
@@ -2908,7 +2942,10 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__song = song; window.__isPlaying = ()=>isPlaying; window.__nodes = ()=>activeNodes.length;
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
-  window.__spring = { cycle:cycleSpring, left:springLeftNow, out:()=>springOut, idx:()=>springIdx, shorten:sec=>{ if(isFinite(springEndAt)) springEndAt = audioCtx.currentTime + sec; } };
+  window.__spring = { live:()=>windSfxLive, render:async grips=>{   // 巻く音だけをオフラインで書き出す（確認用）
+      const off = new OfflineAudioContext(1, 48000*3, 48000); const g = off.createGain(); g.gain.value = .9; g.connect(off.destination);
+      const end = windPattern(off, g, .05, grips); const buf = await off.startRendering(); return { end, data:Array.from(buf.getChannelData(0).subarray(0, Math.ceil((end + .3)*48000))) }; },
+    cycle:cycleSpring, left:springLeftNow, out:()=>springOut, idx:()=>springIdx, shorten:sec=>{ if(isFinite(springEndAt)) springEndAt = audioCtx.currentTime + sec; } };
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
     snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
