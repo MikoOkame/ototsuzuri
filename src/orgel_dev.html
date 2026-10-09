@@ -100,7 +100,7 @@
   }
   #playBtn{ width:54px; height:54px; font-size:22px; background:var(--accent); color:var(--accent-ink); border-color:transparent; }
   #subRow{ display:flex; align-items:center; gap:10px; margin-top:6px; }
-  #modeBtn, #birdBtn{ font-family:inherit; font-size:12px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
+  #modeBtn, #birdBtn, #springBtn{ font-family:inherit; font-size:12px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
   #muteBtn{ font-size:16px; background:transparent; border:0; color:var(--ink); cursor:pointer; }
   #volSlider{ flex:1; accent-color:var(--accent); }
   .modalOverlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(10,8,24,.55); z-index:10; }
@@ -139,6 +139,7 @@
   </div>
   <div id="subRow">
     <button id="modeBtn">🔁 全曲</button>
+    <button id="springBtn" aria-label="ゼンマイ">🗝 ∞</button>
     <button id="birdBtn" aria-pressed="true">🐦 声</button>
     <button id="muteBtn" aria-label="消音">🔊</button>
     <input type="range" id="volSlider" min="0" max="100" value="55" aria-label="音量">
@@ -1401,6 +1402,7 @@ function stopAllAudio(){
   activeNodes = [];
   isPlaying = false;
   song.started = false; song.winding = false; song.speed = 1;
+  springPause();
   updatePlayBtn();
 }
 
@@ -1528,12 +1530,65 @@ function playTrack(idx, gapSec){
   masterGain.gain.linearRampToValueAtTime(targetVol, startAt + .05);
   scheduleTrackLoop(track, startAt, gen);
   isPlaying = true;
+  springResume(startAt);
   updateNowPlaying(); updatePlayBtn(); renderTrackList();
 }
-function togglePlay(){ if(isPlaying) stopAllAudio(); else playTrack(currentTrackIdx); }
+function togglePlay(){
+  if(isPlaying){ stopAllAudio(); return; }
+  if(springOut){ rewindSpring(); playTrack(currentTrackIdx, .75); return; }   // 切れた後：巻き直す音を聞かせてから鳴らす
+  playTrack(currentTrackIdx);
+}
 function nextTrack(){ playTrack((currentTrackIdx+1) % TRACKS.length); }
 function prevTrack(){ playTrack((currentTrackIdx-1+TRACKS.length) % TRACKS.length); }
 function windDown(){ if(isPlaying && !song.winding){ song.winding = true; song.windT = 0; } }
+
+/* ---- ゼンマイ（おやすみタイマー） ----
+   既定は巻きっぱなし（∞）で止まらない（作業 BGM 向け）。再生パネルの「🗝」か、オルゴールの巻き鍵をタップするたびに
+   ∞→15分→30分→60分 と巻き直す。時間が来たら windDown（テンポが落ちて静かに止まる）。
+   残りは AudioContext の時計で数える（画面を閉じても正しく減る）。一時停止中は減らない。曲送り・全曲でも続けて減る。
+   切れた後に再生すると、巻き直す音を聞かせてから同じ長さで鳴り出す。撮影モードでは使わない */
+const SPRING_STEPS = [Infinity, 15*60, 30*60, 60*60];
+let springIdx = 0, springLeft = Infinity, springEndAt = Infinity, springOut = false, springKeySpin = 0;
+function springResume(startAt){ springEndAt = isFinite(springLeft) ? startAt + springLeft : Infinity; }
+function springPause(){
+  if(isFinite(springEndAt) && audioCtx) springLeft = Math.max(0, springEndAt - audioCtx.currentTime);
+  springEndAt = Infinity;
+}
+function springCheck(){   // 時間が来たか（毎コマと 1 秒ごとに見る。画面が隠れていても 1 秒ごとの方で止まる）
+  if(!isPlaying || song.winding || !isFinite(springEndAt) || !audioCtx) return;
+  if(audioCtx.currentTime >= springEndAt){ springLeft = 0; springOut = true; windDown(); }
+}
+function setSpring(idx){
+  springIdx = idx; springOut = false; springLeft = SPRING_STEPS[idx];
+  springEndAt = Infinity;
+  if(isPlaying && audioCtx){ song.winding = false; song.speed = 1; springResume(audioCtx.currentTime); }   // 切れかけでも巻けば戻る
+  windSfx(); springKeySpin += Math.PI*2*.75;
+  updateSpringBtn();
+}
+function cycleSpring(){ setSpring((springIdx + 1) % SPRING_STEPS.length); }
+function rewindSpring(){ springOut = false; springLeft = SPRING_STEPS[springIdx]; windSfx(); springKeySpin += Math.PI*2*.75; updateSpringBtn(); }
+function springLeftNow(){ return isFinite(springEndAt) && audioCtx ? Math.max(0, springEndAt - audioCtx.currentTime) : springLeft; }
+function updateSpringBtn(){
+  const b = document.getElementById('springBtn'); if(!b) return;
+  const left = springLeftNow();
+  const txt = !isFinite(left) ? '🗝 ∞' : springOut ? '🗝 0分' : '🗝 ' + Math.max(1, Math.ceil(left/60)) + '分';
+  if(b.textContent !== txt){ b.textContent = txt; b.setAttribute('aria-label', 'ゼンマイ ' + (isFinite(left) ? '残り' + Math.max(1, Math.ceil(left/60)) + '分' : '巻きっぱなし')); }
+}
+// 巻く音：ラチェットのカリカリ（短い四角波の粒を 7 回）。効果音の経路に流す
+function windSfx(){
+  const ctx = ensureAudioCtx(); if(!ctx) return;
+  if(ctx.state === 'suspended') ctx.resume();
+  ensureSfx();
+  const t0 = ctx.currentTime + .02;
+  for(let i=0;i<7;i++){
+    const t = t0 + i*.085 + Math.random()*.012;
+    const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 1700 + Math.random()*700;
+    const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.09, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .03);
+    o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + .04);
+    o.addEventListener('ended', ()=>g.disconnect());
+  }
+}
+setInterval(()=>{ springCheck(); updateSpringBtn(); }, 1000);
 function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
 function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊'); }
 function cyclePlayMode(){
@@ -1600,6 +1655,7 @@ listBtn.addEventListener('click', ()=>{ renderTrackList(); listModal.classList.a
 listCloseBtn.addEventListener('click', ()=>listModal.classList.remove('show'));
 listModal.addEventListener('click', e=>{ if(e.target === listModal) listModal.classList.remove('show'); });
 modeBtn.addEventListener('click', cyclePlayMode);
+document.getElementById('springBtn').addEventListener('click', cycleSpring);
 document.addEventListener('visibilitychange', ()=>{
   if(!document.hidden && audioCtx && audioCtx.state === 'suspended' && isPlaying) audioCtx.resume();
 });
@@ -1947,6 +2003,38 @@ const orgel = (()=>{
       return { cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE };
     } };
 })();
+
+/* ---- 巻き鍵（仮の箱の右側面。箱を差し替えるときはユーザーのモデルの鍵に替える）。タップでゼンマイを巻く ----
+   軸（x 方向）とつまみ（蝶の羽の形）。再生中はゆっくり逆に回り、ほどけていく様子を見せる。巻くとくるっと回る */
+const windKey = (()=>{
+  const box = orgelRoot.getObjectByName('Box_Right');
+  const outX = box.position.x + box.geometry.parameters.width/2;   // 右側面の外の面
+  const brass = inToon(0xa98549);
+  const g = new THREE.Group(); g.name = 'WindKey';
+  g.position.set(outX, 2.2, 0); orgelRoot.getObjectByName('Box').add(g);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.15, .15, .9, 10), brass); shaft.rotation.z = Math.PI/2; shaft.position.x = .45; g.add(shaft); shaft.name = 'WindKey_Shaft';
+  addOutline(shaft, .02, OUT_MECH);
+  const bow = new THREE.Group(); bow.position.x = .95; g.add(bow);
+  for(const sy of [-1, 1]){
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .12, 20), brass); w.name = 'WindKey_Wing';
+    w.rotation.z = Math.PI/2; w.scale.set(1, 1, .72); w.position.y = sy*.6; bow.add(w); addOutline(w, .02, OUT_MECH);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(.26, .26, .2, 12), brass); hub.rotation.z = Math.PI/2; bow.add(hub); hub.name = 'WindKey_Hub';
+  // タップの当たり（見えない、少し大きめ）
+  const hit = new THREE.Mesh(new THREE.SphereGeometry(1.3, 8, 6), new THREE.MeshBasicMaterial({ visible:false }));
+  hit.position.x = .8; g.add(hit);
+  return { g, hit };
+})();
+function updateWindKey(dt){
+  if(springKeySpin > 0){ const d = Math.min(springKeySpin, dt*9); springKeySpin -= d; windKey.g.rotation.x -= d; }   // 巻く：手前へくるっと
+  else if(isPlaying && song.started && !springOut) windKey.g.rotation.x += dt*.35*song.speed;                       // ほどける：ゆっくり逆へ
+}
+function pickWindKey(clientX, clientY){
+  _keyNdc.set(clientX/window.innerWidth*2 - 1, -(clientY/window.innerHeight)*2 + 1);
+  _keyRay.setFromCamera(_keyNdc, camera);
+  return _keyRay.intersectObject(windKey.hit, false).length > 0;
+}
+const _keyRay = new THREE.Raycaster(), _keyNdc = new THREE.Vector2();
 
 /* ---------- ベランダ ---------- */
 const iron = toon(0x3e3552);
@@ -2820,6 +2908,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__song = song; window.__isPlaying = ()=>isPlaying; window.__nodes = ()=>activeNodes.length;
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
+  window.__spring = { cycle:cycleSpring, left:springLeftNow, out:()=>springOut, idx:()=>springIdx, shorten:sec=>{ if(isFinite(springEndAt)) springEndAt = audioCtx.currentTime + sec; } };
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
     snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
@@ -2913,6 +3002,7 @@ let lastPinch = 0, lastMid = null;
 canvas.addEventListener('pointerdown', e=>{
   const panBtn = e.pointerType === 'mouse' && (e.button === 2 || e.button === 1);
   logInput(`pointerdown type=${e.pointerType} button=${e.button} buttons=${e.buttons} → ${panBtn ? '移動' : '回す'}`);
+  if(pointers.size === 0 && !panBtn && !CAPTURE && pickWindKey(e.clientX, e.clientY)){ cycleSpring(); hideHint(); return; }   // 巻き鍵
   const hit = pointers.size === 0 && !panBtn ? pickBird(e.clientX, e.clientY) : null;
   if(hit){ touchBird(hit.bird, hit.point); hideHint(); return; }
   canvas.setPointerCapture(e.pointerId);
@@ -3025,6 +3115,7 @@ if(PARAMS.has('export')){
     const counter = {};
     function copy(src, parentName){
       if(src.isLight || src.isPoints) return null;
+      if(src.isMesh && src.material && src.material.visible === false) return null;   // 見えない当たり（巻き鍵のタップ用）
       if(src.isMesh && !Array.isArray(src.material) && isOutline(src.material)) return null;
       let node;
       if(src.isInstancedMesh){
@@ -3272,6 +3363,7 @@ function stepFrame(dt, now, noRender){
     });
   }
   orgel.update(dt);
+  updateWindKey(dt); springCheck();
   birdsUpdate(dt);
   // 発光する鳥：明るさがゆっくり脈打つ（正弦波。点滅に見えないよう穏やかに）
   for(const b of birds) if(b.glowPh >= 0) b.body.material.emissiveIntensity = BIRD_GLOW.BASE + BIRD_GLOW.PULSE*Math.sin(clock*Math.PI*2/BIRD_GLOW.PERIOD + b.glowPh);
