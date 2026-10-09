@@ -100,6 +100,9 @@
   }
   #playBtn{ width:54px; height:54px; font-size:22px; background:var(--accent); color:var(--accent-ink); border-color:transparent; }
   #subRow{ display:flex; align-items:center; gap:10px; margin-top:6px; }
+  /* ゼンマイの手描きボタン：絵は背景、残り時間の文字は右側に重ねる */
+  #springBtn.hasIconText{ border:0 !important; border-radius:0 !important; background-color:transparent !important;
+    background-size:100% 100%; background-repeat:no-repeat; padding:0 9px 0 29px !important; text-align:center; line-height:29px; }
   #modeBtn, #birdBtn, #springBtn{ font-family:inherit; font-size:12px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
   #muteBtn{ font-size:16px; background:transparent; border:0; color:var(--ink); cursor:pointer; }
   #volSlider{ flex:1; accent-color:var(--accent); }
@@ -1571,7 +1574,13 @@ function springLeftNow(){ return isFinite(springEndAt) && audioCtx ? Math.max(0,
 function updateSpringBtn(){
   const b = document.getElementById('springBtn'); if(!b) return;
   const left = springLeftNow();
-  const txt = !isFinite(left) ? '🗝 ∞' : springOut ? '🗝 0分' : '🗝 ' + Math.max(1, Math.ceil(left/60)) + '分';
+  const hasArt = ICONS.spring;
+  const time = !isFinite(left) ? '∞' : springOut ? '0分' : Math.max(1, Math.ceil(left/60)) + '分';
+  const txt = (hasArt ? '' : '🗝 ') + time;
+  if(hasArt && !b.classList.contains('hasIconText')){
+    const [, w, h] = ICON_FILES.spring;
+    b.classList.add('hasIconText'); b.style.backgroundImage = `url("${ICONS.spring}")`; b.style.width = w + 'px'; b.style.height = h + 'px';
+  }
   if(b.textContent !== txt){ b.textContent = txt; b.setAttribute('aria-label', 'ゼンマイ ' + (isFinite(left) ? '残り' + Math.max(1, Math.ceil(left/60)) + '分' : '巻きっぱなし')); }
 }
 /* 巻く音：ラチェットの爪が歯を乗り越えて落ちる「カチッ」。音程のない衝撃音なので、雑音の粒で作る（オシレーターだとピコピコになる）。
@@ -1639,6 +1648,7 @@ const ICON_FILES = {   // key: [ファイル名, 表示の幅, 高さ]
   play:['icon_play.png', 54, 54], pause:['icon_pause.png', 54, 54], prev:['icon_prev.png', 44, 44], next:['icon_next.png', 44, 44],
   list:['icon_list.png', 90, 38], modeSingle:['icon_mode_single.png', 59, 29], modeAll:['icon_mode_all.png', 59, 29], modeShuffle:['icon_mode_shuffle.png', 59, 29],
   birdOn:['icon_bird_on.png', 52, 29], birdOff:['icon_bird_off.png', 52, 29], unmute:['icon_unmute.png', 32, 21], mute:['icon_mute.png', 32, 21],
+  spring:['icon_spring.png', 76, 29],   // ゼンマイ：ボタン全体の絵。残り時間の文字はアプリが右側に重ねる（絵の左 29×29 に鍵、右は文字用に空ける）
 };
 const ICON_DIR = PARAMS.get('icondir') || ROOT + 'assets/ui/';   // ?icondir= は確認用
 const ICONS = {};                                             // 読み込めた画像の URL
@@ -1700,6 +1710,7 @@ function refreshPlayerIcons(){
   setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊');
 }
 iconRefresh.push(refreshPlayerIcons);
+iconRefresh.push(updateSpringBtn);
 refreshPlayerIcons();
 /* 外枠の画像：あれば当てる。無ければ（読み込み失敗なら）今の枠のまま */
 const FRAME_SRC = PARAMS.get('frame') || ROOT + 'assets/ui/player_frame.png';   // ?frame= は確認用
