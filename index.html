@@ -2208,7 +2208,13 @@ function assignBird(b){
     b.body.material.needsUpdate = true;
     b.model.scale.setScalar(e.scale);
     b.cents = voiceCents(e.id); b.lastPitch = 0;
-    b.loading = false; b.needDraw = false;
+    b.loading = false; b.needDraw = false; b.texFails = 0;
+  }).catch(()=>{
+    // 読めなかった（電波が悪いなど）：失敗した読み込みを捨て、少し待ってからやり直す（待ちは 3→6→12…秒、最長 30 秒）
+    if(birdTexCache[e.id]) delete birdTexCache[e.id];
+    b.texFails = (b.texFails || 0) + 1;
+    b.retryAt = clock + Math.min(30, 3*Math.pow(2, b.texFails - 1));
+    b.id = ''; b.loading = false; b.needDraw = true;
   });
 }
 // 帰った鳥：テクスチャを解放し、次に戻るときに抽選し直す
@@ -2525,7 +2531,7 @@ function birdsUpdate(dt){
   for(const b of birds){
     const want = wantPresent(b, dayT);
     if(want && b.mode === 'away'){
-      if(b.needDraw || b.loading){ if(!b.loading) assignBird(b); continue; }   // 顔ぶれを決めてテクスチャが届くまで待つ
+      if(b.needDraw || b.loading){ if(!b.loading && clock >= (b.retryAt || 0)) assignBird(b); continue; }   // 顔ぶれを決めてテクスチャが届くまで待つ
       if(b.arriveAt < 0){ b.arriveAt = clock + stagger + Math.random()*1.2; stagger += 1.1 + Math.random()*.9; }
       // 撮影で飛来の秒を指定した鳥は、その秒ちょうどに来る（他の鳥とのずらしは使わない）
       const capHold = CAPTURE && CAP.hold && CAP.hold[b.idx] != null ? CAP.hold[b.idx] : null;
@@ -2675,9 +2681,24 @@ function pickBird(clientX, clientY){
   return hits.length ? { bird:hits[0].object.userData.bird, point:hits[0].point } : null;
 }
 
-async function loadBirds(){
+async function loadBirdModel(){
+  // 鳥のモデル（約 650KB）。電波が悪くて読めなかったら、待ってやり直す（2→4→8…秒、最長 30 秒。電波が戻ったらすぐ）。
+  // 以前は一度失敗するとそのまま諦め、曲は鳴るのに鳥が来なかった
   const loader = new GLTFLoader();
-  birdSrc[BIRD_VARIANT] = await loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]);
+  for(let n = 0; ; n++){
+    try{ return await loader.loadAsync(ASSET_BASE + BIRD_FILES[BIRD_VARIANT]); }
+    catch(e){
+      window.__err = (window.__err||'') + 'bird model retry ' + (n + 1) + ': ' + (e && e.message) + '\n';
+      await new Promise(res=>{
+        const t = setTimeout(done, Math.min(30, 2*Math.pow(2, n))*1000);
+        function done(){ clearTimeout(t); window.removeEventListener('online', done); res(); }
+        window.addEventListener('online', done);
+      });
+    }
+  }
+}
+async function loadBirds(){
+  birdSrc[BIRD_VARIANT] = await loadBirdModel();
   // 定位置は3つ（手すり左・手すり右・窓台）。どの鳥が来るかは抽選。モデルの正面は +z（rotation.y = 0 で部屋を向く）
   // outside：窓の外（手すり）。夜、座り始める前に帰り（leaveT）、夜明けに戻る（backT）。室内の鳥はずっと居る
   const defs = [
@@ -2696,7 +2717,7 @@ async function loadBirds(){
     b.model.visible = false;
   });
   // 最初に開いたときに、その時刻に居る鳥の顔ぶれを抽選してテクスチャを読む（夜は窓台の1羽だけ）
-  await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && inOutsideHours(b, dayT)).map(assignBird));
+  await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && inOutsideHours(b, dayT)).map(assignBird));   // assignBird は失敗しても投げない（後でやり直す）
   // ?birds：最初から定位置に居る（確認用）
   for(const b of birds) if(firstPlayDone && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.home.pos).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
