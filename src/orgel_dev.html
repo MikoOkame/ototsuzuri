@@ -210,11 +210,12 @@ const DAY_LEN = 720;                 // 一日 = 12 分
 const DAY_START = 0.62;              // 開いたときは夕方
 const SUNRISE = 0.08, SUNSET = 0.70; // 太陽が水平線を越える時刻
 const MOONRISE = 0.74, MOONSET = 1.06;   // 月（翌朝 0.06 に沈む）
-const MOON_CYCLE_DAYS = 30;          // 満ち欠けの一周り（ゲーム内の日数。実時間で6時間）
+const MOON_CYCLE_DAYS = 10;          // 満ち欠けの一周り（ゲーム内の日数。実時間で2時間：30分で1/4周り＝半月が三日月や満月になるほど変わる。一晩では目に見えて変わらない）
 // 開いたときの月齢はランダム（毎回ほぼ満月になるのを避ける）。0 が満月、0.5 が新月。
-// ?moon=0.25 で指定できる（向きの確認用）。撮影は 0 から（乱数の並びを変えず、毎回同じ絵にするため）
+// ?moon=0.25 で開いた時点の月齢を指定できる（向きの確認用）。撮影は 0 から（乱数の並びを変えず、毎回同じ絵にするため）
 const MOON_START = PARAMS.has('moon') ? parseFloat(PARAMS.get('moon')) : CAPTURE ? 0 : Math.random();
 let dayT = PARAMS.has('t') ? parseFloat(PARAMS.get('t')) : DAY_START;
+const MOON_T0 = dayT;                // 開いたときの時刻（MOON_START はこの時点の月齢）
 let dayCount = 0;                    // 経過した日数（満ち欠け用）
 let timeSpeed = PARAMS.has('t') ? 0 : (parseFloat(PARAMS.get('speed')) || 1);
 
@@ -354,7 +355,7 @@ function updateSky(t){
   const q = (tm - MOONRISE)/(MOONSET - MOONRISE);
   arcDir(moonDir, q, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(14));
   moonUp = (q >= 0 && q <= 1) ? sstep(-.02, .06, moonDir.y) : 0;
-  moonPhase = (MOON_START + (dayCount + t)/MOON_CYCLE_DAYS) % 1;
+  moonPhase = ((MOON_START + (dayCount + t - MOON_T0)/MOON_CYCLE_DAYS) % 1 + 1) % 1;
 }
 
 /* ---------- トゥーン用の3段階グラデーション ---------- */
@@ -577,19 +578,23 @@ const moonMat = new THREE.ShaderMaterial({
       vec2 n2=p/.31;
       float z2=1.-dot(n2,n2);
       vec3 n=vec3(n2, sqrt(max(z2,0.)));
-      // 満ち欠け：光の向きを位相で回す。0 が満月
+      // 満ち欠け：光の向きを位相で回す。0 が満月。北半球（日本）の見え方：満月の後（下弦）は左が光り、満月の前（上弦）は右が光る
       float ph=uPhase*6.2831853;
-      vec3 L=normalize(vec3(sin(ph), .12, cos(ph)));
+      vec3 L=normalize(vec3(-sin(ph), .12, cos(ph)));
       float lit=smoothstep(-.08,.12,dot(n,L));
+      float full=.5+.5*cos(ph);   // 光っている割合（満月 1、新月 0）
       // クレーター：ノイズの暗い斑と、縁の明るい輪
       float c1=fbm(n2*3.1+7.3), c2=noise(n2*9.+2.);
       float mare=smoothstep(.45,.62,c1)*.22;
       float pits=smoothstep(.72,.85,c2)*.16;
       float rim=smoothstep(.68,.72,c2)*(1.-smoothstep(.72,.78,c2))*.12;
       vec3 col=uCol*(1.-mare-pits+rim);
-      col*=mix(.10,1.,lit);
-      float halo=pow(max(0.,1.-d),3.)*.22;
-      gl_FragColor=vec4(mix(uCol*.8,col,disc), max(disc, halo)*uVis);
+      // 欠けた所は黒く塗らず半ば透かして、後ろの空の色に馴染ませる（地球照のようにわずかに青白く残す）
+      vec3 dark=vec3(.16,.17,.24);
+      col=mix(dark, col, lit);
+      float a=disc*mix(.45,1.,lit);
+      float halo=pow(max(0.,1.-d),3.)*.22*mix(.2,1.,full);   // 細い月ほど光の輪も弱く
+      gl_FragColor=vec4(mix(uCol*.8,col,disc), max(a, halo)*uVis);
     }`
 });
 const moon = new THREE.Mesh(new THREE.PlaneGeometry(1,1), moonMat);
