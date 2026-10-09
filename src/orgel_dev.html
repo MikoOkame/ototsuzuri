@@ -211,6 +211,9 @@ const DAY_START = 0.62;              // 開いたときは夕方
 const SUNRISE = 0.08, SUNSET = 0.70; // 太陽が水平線を越える時刻
 const MOONRISE = 0.74, MOONSET = 1.06;   // 月（翌朝 0.06 に沈む）
 const MOON_CYCLE_DAYS = 30;          // 満ち欠けの一周り（ゲーム内の日数。実時間で6時間）
+// 開いたときの月齢はランダム（毎回ほぼ満月になるのを避ける）。0 が満月、0.5 が新月。
+// ?moon=0.25 で指定できる（向きの確認用）。撮影は 0 から（乱数の並びを変えず、毎回同じ絵にするため）
+const MOON_START = PARAMS.has('moon') ? parseFloat(PARAMS.get('moon')) : CAPTURE ? 0 : Math.random();
 let dayT = PARAMS.has('t') ? parseFloat(PARAMS.get('t')) : DAY_START;
 let dayCount = 0;                    // 経過した日数（満ち欠け用）
 let timeSpeed = PARAMS.has('t') ? 0 : (parseFloat(PARAMS.get('speed')) || 1);
@@ -351,7 +354,7 @@ function updateSky(t){
   const q = (tm - MOONRISE)/(MOONSET - MOONRISE);
   arcDir(moonDir, q, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(14));
   moonUp = (q >= 0 && q <= 1) ? sstep(-.02, .06, moonDir.y) : 0;
-  moonPhase = ((dayCount + t)/MOON_CYCLE_DAYS) % 1;
+  moonPhase = (MOON_START + (dayCount + t)/MOON_CYCLE_DAYS) % 1;
 }
 
 /* ---------- トゥーン用の3段階グラデーション ---------- */
