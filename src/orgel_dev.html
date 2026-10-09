@@ -1227,16 +1227,20 @@ function trackNode(node){
   return node;
 }
 
+/* オルゴールの高音の抑え：耳は 2〜5kHz がいちばん敏感で、同じ音量でも高い音ほど刺さる。
+   MB_HI_HZ（ファ6）より上は、高くなるほど本体を弱め、倍音（2倍）はさらに強く弱める。?mbhi=0 で抑え無し（聞き比べ用） */
+const MB_HI_HZ = 1400, MB_HI = PARAMS.get('mbhi') !== '0';
 function playMusicBoxNote(startTime, midi, dur, vel){
   const freq = midiToFreq(midi);
+  const hi = MB_HI && freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;   // ラ6 で 0.8、ド7 で 0.67、ファ7 で 0.5
   const osc1 = trackNode(audioCtx.createOscillator()); osc1.type = 'sine'; osc1.frequency.value = freq;
   const osc2 = trackNode(audioCtx.createOscillator()); osc2.type = 'sine'; osc2.frequency.value = freq*2.008;
-  const peak = clampNum(vel/127,.05,1)*.5, attack = .006, release = Math.min(dur*2.4+.3, 2);
+  const peak = clampNum(vel/127,.05,1)*.5*hi, attack = .006, release = Math.min(dur*2.4+.3, 2);
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime+attack);
   g.gain.exponentialRampToValueAtTime(.0001, startTime+attack+release);
-  const g2 = audioCtx.createGain(); g2.gain.value = .25;
+  const g2 = audioCtx.createGain(); g2.gain.value = .25*hi;
   osc1.connect(g); osc2.connect(g2); g2.connect(g); g.connect(masterGain); sendToReverb(g, .5);
   const stopAt = startTime+attack+release+.05;
   osc1.start(startTime); osc1.stop(stopAt); osc2.start(startTime); osc2.stop(stopAt);
