@@ -2723,9 +2723,12 @@ async function loadBirds(){
     b.model.visible = false;
   });
   // 最初に開いたときに、その時刻に居る鳥の顔ぶれを抽選してテクスチャを読む（夜は窓台の1羽だけ）
+  const startPresent = firstPlayDone;   // ?birds のときだけ「最初から定位置に居る」。読み込みを待つ間に再生されても、ここで取った値で判断する
   await Promise.all(birds.filter(b=>wantPresent(b, dayT) || !b.outside || !firstPlayDone && inOutsideHours(b, dayT)).map(assignBird));   // assignBird は失敗しても投げない（後でやり直す）
   // ?birds：最初から定位置に居る（確認用）
-  for(const b of birds) if(firstPlayDone && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
+  // 読み込みを待つ間に再生が始まると、届いた鳥から飛来が始まっている。その鳥（away 以外）には触らない。
+  //（以前は firstPlayDone を見ていたので、電波が遅いと飛来途中の鳥を宙で止まり木扱いにし、まだの鳥は定位置にいきなり出した）
+  for(const b of birds) if(startPresent && b.mode === 'away' && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.home.pos).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
 }
 loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
