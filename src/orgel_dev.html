@@ -1807,8 +1807,8 @@ const orgel = (()=>{
   const cyl = new THREE.Group(); cyl.position.set(0, 0, CYL_Z); mech.add(cyl);
   const drum = new THREE.Mesh(new THREE.CylinderGeometry(R, R, CYL_LEN, 48), brass);
   drum.rotation.z = Math.PI/2; cyl.add(drum); addOutline(drum, .03, OUT_MECH);
-  const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 9.4, 12), steelDk);
-  axle.rotation.z = Math.PI/2; axle.position.x = .6; cyl.add(axle);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 9.3, 12), steelDk);
+  axle.rotation.z = Math.PI/2; axle.position.x = .6; cyl.add(axle);   // 左の支柱（-3.6）から外側の受け板（5.1）まで
 
   /* 歯車 */
   function gearGeo(r, n, depth, hole, windows){
@@ -1829,39 +1829,122 @@ const orgel = (()=>{
     g.translate(0,0,-depth/2); g.rotateY(Math.PI/2);
     return g;
   }
-  const bigGear = new THREE.Mesh(gearGeo(1.3, 40, .14, .14, true), brass);
-  bigGear.position.x = 3.95; cyl.add(bigGear); addOutline(bigGear, .02, OUT_MECH);
+  function sawGeo(r, n, depth, hole){   // 爪車：のこぎり歯（片側は斜め、片側は切り立つ。爪は切り立った面に掛かる）
+    const sh = new THREE.Shape(), root = r*.78, step = Math.PI*2/n;
+    for(let i=0;i<n;i++){
+      const a = i*step;
+      const p0 = [Math.cos(a)*root, Math.sin(a)*root], p1 = [Math.cos(a + step*.92)*r, Math.sin(a + step*.92)*r], p2 = [Math.cos(a + step)*root, Math.sin(a + step)*root];
+      i === 0 ? sh.moveTo(...p0) : sh.lineTo(...p0); sh.lineTo(...p1); sh.lineTo(...p2);
+    }
+    sh.closePath();
+    const h = new THREE.Path(); h.absarc(0,0,hole,0,Math.PI*2,true); sh.holes.push(h);
+    const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled:false });
+    g.translate(0,0,-depth/2); g.rotateY(Math.PI/2);
+    return g;
+  }
+  /* 動力の流れ（右端に集める。鍵の軸＝ゼンマイの軸）
+     巻き鍵 → 香箱の軸（右の壁を抜ける）→ 爪車と爪 → 香箱車 → シリンダーの大歯車 → シリンダー
+     シリンダーの大歯車 → 中間車の小歯車 → 中間車 → 調速機のウォーム（縦軸）→ 空気ブレーキの羽根
+     香箱車・大歯車・中間車の小歯車は同じ面（X_BG）に並べ、外から一続きに読めるようにする
+     ・ゼンマイは香箱（側板の内側、シリンダーの後ろ）の中。外端は香箱に留めて動かず、内端は軸に留める。
+     ・巻くと軸と爪車だけが回り、爪は爪車の歯を乗り越える（カチッ）。香箱車は止まったまま。
+     ・鳴っている間はゼンマイが軸を戻す向きに回し、爪車が爪を押して香箱車ごと回す。だから鍵もゆっくり回る（香箱車と同じ速さ）。
+     ・噛み合う歯車は歯の大きさを揃える（香箱車・大歯車・中間車の小歯車、中間車とウォームのねじ山）。
+       中心の間は、二つの半径を足した長さの 0.935 倍（歯先どうしが少し重なる）。
+     ・歯数：香箱車 48、大歯車 30、中間車の小歯車 9、中間車 26（1 条のウォーム）。香箱車はシリンダーの 0.625 倍、羽根は約 87 倍の速さ */
+  const PITCH = .935;
+  const CYL_C = new THREE.Vector2(0, CYL_Z);             // (y, z)
+  const R_GW = 1.6, R_BG = 1.0, R_P2 = .3, R_W2 = .8;
+  const N_GW = 48, N_BG = 30, N_P2 = 9, N_W2 = 26;
+  const ARB = new THREE.Vector2(0, CYL_Z - PITCH*(R_GW + R_BG));   // 香箱の軸（シリンダーの真後ろ、同じ高さ）
+  const G2Y = 1.0, G2 = new THREE.Vector2(G2Y, CYL_Z + Math.sqrt((PITCH*(R_BG + R_P2))**2 - G2Y**2));   // 中間車（手前上）
+  const X_PLATE = 3.6, X_BRIDGE = 5.1;                     // 側板と外側の受け板
+  const X_BG = 4.25, X_GW = X_BG, X_RATCHET = 4.42, X_W2 = 4.75;
 
-  /* 支柱と側板 */
+  const bigGear = new THREE.Mesh(gearGeo(R_BG, N_BG, .12, .14, true), brass);
+  bigGear.position.x = X_BG; cyl.add(bigGear); addOutline(bigGear, .02, OUT_MECH);
+
+  /* 支柱と側板。側板は香箱の軸まで後ろへ伸ばす */
   obox(.3, 2.2, 1.3, brassDk, -3.6, -.6, CYL_Z, mech, .025).name = 'Post_L';
-  const plate = new THREE.Shape();
-  plate.moveTo(-2.2,-1.62); plate.lineTo(1.9,-1.62); plate.lineTo(1.9,.6); plate.quadraticCurveTo(1.9,2.8,.4,2.8); plate.lineTo(-1.4,1.3); plate.quadraticCurveTo(-2.2,.9,-2.2,.2); plate.closePath();
+  const plate = new THREE.Shape();   // 形の x が奥行き（z）、y が高さ
+  plate.moveTo(ARB.y - .75, -1.62); plate.lineTo(1.9, -1.62); plate.lineTo(1.9, .6); plate.quadraticCurveTo(1.9, 2.2, .6, 2.2);
+  plate.lineTo(-1.2, 1.3); plate.quadraticCurveTo(-1.9, .9, ARB.y, .9); plate.quadraticCurveTo(ARB.y - .75, .9, ARB.y - .75, 0); plate.closePath();
   const plateGeo = new THREE.ExtrudeGeometry(plate, { depth:.22, bevelEnabled:false });
   plateGeo.translate(0,0,-.11); plateGeo.rotateY(-Math.PI/2);
   const sidePlate = new THREE.Mesh(plateGeo, brassDk);
-  sidePlate.position.set(3.6, 0, 0); mech.add(sidePlate); addOutline(sidePlate, .025, OUT_MECH);
-
-  /* 輪列と調速機：大歯車 → 中間の歯車（手前上）→ 小歯車（さらに上）→ 羽根は側板の外側の一番上。
-     一か所に重ねず、縦に段をつけて読めるようにする */
-  const S2 = new THREE.Vector3(4.1, 1.45, 1.25);
-  const shaft2 = new THREE.Group(); shaft2.position.copy(S2); mech.add(shaft2);
-  const pin2 = new THREE.Mesh(gearGeo(.45, 12, .2, .06), brass); shaft2.add(pin2); addOutline(pin2, .015, OUT_MECH);
-  const g2 = new THREE.Mesh(gearGeo(.8, 26, .12, .06, true), brass); g2.position.x = .5; shaft2.add(g2); addOutline(g2, .015, OUT_MECH);
-  const a2 = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.4,8), steelDk); a2.rotation.z = Math.PI/2; a2.position.x = .1; shaft2.add(a2);
-  const S3 = new THREE.Vector3(4.6, 2.45, 1.95);
-  const shaft3 = new THREE.Group(); shaft3.position.copy(S3); mech.add(shaft3);
-  const pin3 = new THREE.Mesh(gearGeo(.3, 9, .16, .04), brass); shaft3.add(pin3); addOutline(pin3, .012, OUT_MECH);
-  const a3 = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,2.2,8), steelDk); a3.rotation.z = Math.PI/2; a3.position.x = .5; shaft3.add(a3);
-  const fan = new THREE.Group(); fan.position.x = 1.3; shaft3.add(fan);
-  {
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .16, 12), brassDk);
-    hub.rotation.z = Math.PI/2; fan.add(hub); addOutline(hub, .012, OUT_MECH);
+  sidePlate.position.set(X_PLATE, 0, 0); mech.add(sidePlate); addOutline(sidePlate, .025, OUT_MECH);
+  /* 外側の受け板：香箱の軸・シリンダーの軸・中間車の軸の外端を、細い腕でつないで受ける（歯車を隠さない）。足は台座へ */
+  const bridgePlate = new THREE.Group(); bridgePlate.position.x = X_BRIDGE; mech.add(bridgePlate);
+  { const pts = [ARB, CYL_C, G2];   // (y, z)
+    const boss = p=>{ const m = new THREE.Mesh(new THREE.CylinderGeometry(.28, .28, .15, 16), brassDk); m.rotation.z = Math.PI/2; m.position.set(0, p.x, p.y); bridgePlate.add(m); addOutline(m, .015, OUT_MECH); };
+    const bar = (p, q, w)=>{ const len = p.distanceTo(q); const m = new THREE.Mesh(new THREE.BoxGeometry(.15, w, len), brassDk);
+      m.position.set(0, (p.x + q.x)/2, (p.y + q.y)/2); m.rotation.x = -Math.atan2(q.x - p.x, q.y - p.y); bridgePlate.add(m); addOutline(m, .015, OUT_MECH); };
+    pts.forEach(boss); bar(ARB, CYL_C, .32); bar(CYL_C, G2, .32);
+    [ARB, CYL_C].forEach(p=>bar(p, new THREE.Vector2(-1.625, p.y), .3));   // 足
   }
-  [0, Math.PI].forEach(a=>{
-    const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .7, .45), brass);
-    b.position.set(0, Math.cos(a)*.45, Math.sin(a)*.45); b.rotation.x = -a; fan.add(b); addOutline(b, .015, OUT_MECH);
+  /* 香箱（ゼンマイの入れ物）。動かない。側板の内側、シリンダーの後ろ。台座へ脚で留める */
+  const barrel = new THREE.Group(); barrel.position.set(2.6, ARB.x, ARB.y); mech.add(barrel);
+  const drumB = new THREE.Mesh(new THREE.CylinderGeometry(.85, .85, 1.4, 32), brassDk);
+  drumB.rotation.z = Math.PI/2; barrel.add(drumB); addOutline(drumB, .025, OUT_MECH);
+  [-.45, .45].forEach(dx=>{   // 胴の帯（ふたの縁）
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(.87, .87, .08, 32), brass);
+    rim.rotation.z = Math.PI/2; rim.position.x = dx*1.4/.9*.9; barrel.add(rim);
   });
-  obox(1.2, .18, .18, brassDk, 4.3, S3.y, S3.z, mech, .012).name = 'FanArm';   // 羽根の軸受けの腕
+  { const top = ARB.x - .7; obox(.5, top + 1.625, .5, brassDk, 2.6, (top - 1.625)/2, ARB.y, mech, .015).name = 'Barrel_Foot'; }
+  /* 香箱の軸：鍵と一緒に回る（巻くとき・鳴っている間）。爪車は軸に固定 */
+  const arbor = new THREE.Group(); arbor.position.set(0, ARB.x, ARB.y); mech.add(arbor);
+  const IW_IN = 6.1;   // 箱の内側の右の面（仮の箱の IW）
+  { const x0 = 2.6 + .7, x1 = IW_IN + .05;
+    const sh = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, x1 - x0, 10), steelDk);
+    sh.rotation.z = Math.PI/2; sh.position.x = (x0 + x1)/2; arbor.add(sh); sh.name = 'Arbor_Shaft'; }
+  const ratchet = new THREE.Mesh(sawGeo(.55, 14, .1, .1), steel);
+  ratchet.position.x = X_RATCHET; arbor.add(ratchet); addOutline(ratchet, .012, OUT_MECH);
+  /* 香箱車：軸に遊んではまる。爪（香箱車の面にピンで留める）が爪車の歯に掛かる */
+  const greatWheel = new THREE.Group(); greatWheel.position.set(X_GW, ARB.x, ARB.y); mech.add(greatWheel);
+  const gwGear = new THREE.Mesh(gearGeo(R_GW, N_GW, .12, .1, true), brass); greatWheel.add(gwGear); addOutline(gwGear, .02, OUT_MECH);
+  const CLICK_A = 1.0;   // 爪の付け根の向き（香箱車の上で）
+  const clickPin = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, .26, 8), steelDk);
+  clickPin.rotation.z = Math.PI/2; clickPin.position.set(.12, Math.sin(CLICK_A)*.95, Math.cos(CLICK_A)*.95); greatWheel.add(clickPin);
+  const click = new THREE.Group(); click.position.set(X_RATCHET - X_GW, Math.sin(CLICK_A)*.95, Math.cos(CLICK_A)*.95); greatWheel.add(click);
+  { // 爪：付け根から爪車の歯先へ向かう細い板
+    const tip = new THREE.Vector2(Math.sin(CLICK_A + .55)*.52, Math.cos(CLICK_A + .55)*.52);
+    const base = new THREE.Vector2(click.position.y, click.position.z);
+    const len = tip.distanceTo(base);
+    const pawl = new THREE.Mesh(new THREE.BoxGeometry(.08, .1, len), steelDk);
+    pawl.position.set(0, (tip.x - base.x)/2, (tip.y - base.y)/2);
+    pawl.rotation.x = -Math.atan2(tip.x - base.x, tip.y - base.y);
+    click.add(pawl); addOutline(pawl, .01, OUT_MECH); pawl.name = 'Click_Pawl';
+  }
+
+  /* 中間車（大歯車の小歯車 → 中間車）。軸は側板と受け板のあいだ */
+  const shaft2 = new THREE.Group(); shaft2.position.set(0, G2.x, G2.y); mech.add(shaft2);
+  const pin2 = new THREE.Mesh(gearGeo(R_P2, N_P2, .2, .06), brass); pin2.position.x = X_BG; shaft2.add(pin2); addOutline(pin2, .015, OUT_MECH);
+  const g2 = new THREE.Mesh(gearGeo(R_W2, N_W2, .12, .06, true), brass); g2.position.x = X_W2; shaft2.add(g2); addOutline(g2, .015, OUT_MECH);
+  const a2 = new THREE.Mesh(new THREE.CylinderGeometry(.05,.05, X_BRIDGE - X_PLATE + .2, 8), steelDk); a2.rotation.z = Math.PI/2; a2.position.x = (X_PLATE + X_BRIDGE)/2; shaft2.add(a2);
+
+  /* 調速機：中間車の手前の縁に、縦軸のウォーム（1 条のねじ）。軸の上に空気ブレーキの羽根。
+     軸の下は台座から立つ柱、上は側板から出る腕で受ける */
+  const GOV_Z = G2.y + PITCH*R_W2 + .13;   // ねじ山（有効半径 .13）が中間車の歯に掛かる位置
+  const gov = new THREE.Group(); gov.position.set(X_W2, G2.x, GOV_Z); mech.add(gov);
+  const GOV_BOT = -1.0, GOV_TOP = 1.75, FAN_Y = 1.45;   // gov の中の高さ（中間車の中心が 0）
+  { const ar = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, GOV_TOP - GOV_BOT, 8), steelDk);
+    ar.position.y = (GOV_TOP + GOV_BOT)/2; gov.add(ar); ar.name = 'Gov_Arbor'; }
+  { // ウォーム：芯とねじ山（らせん）
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .75, 12), steel); gov.add(core); addOutline(core, .01, OUT_MECH); core.name = 'Worm_Core';
+    const turns = 4, lead = (2*Math.PI*R_W2*PITCH)/N_W2, h = turns*lead;
+    class Helix extends THREE.Curve{ getPoint(t, o = new THREE.Vector3()){ const a = t*turns*Math.PI*2; return o.set(Math.cos(a)*.12, -h/2 + t*h, Math.sin(a)*.12); } }
+    const thread = new THREE.Mesh(new THREE.TubeGeometry(new Helix(), 96, .045, 6, false), steel); gov.add(thread); thread.name = 'Worm_Thread';
+  }
+  const fan = new THREE.Group(); fan.position.y = FAN_Y; gov.add(fan);
+  {
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .2, 12), brassDk); fan.add(hub); addOutline(hub, .012, OUT_MECH);
+  }
+  [-1, 1].forEach(sx=>{
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(.5, .42, .04), brass);
+    bl.position.x = sx*.33; fan.add(bl); addOutline(bl, .012, OUT_MECH);
+  });
+  obox(.3, (G2.x + GOV_BOT) + 1.625, .3, brassDk, X_W2, (G2.x + GOV_BOT - 1.625)/2 - .02, GOV_Z, mech, .015).name = 'Gov_Post';   // 下の受け（柱）
+  obox(X_W2 - X_PLATE + .15, .14, .2, brassDk, (X_PLATE + X_W2)/2 + .07, G2.x + .75, GOV_Z, mech, .012).name = 'Gov_Cock';   // 上の受け：側板から出る腕（ウォームの上、羽根の下）
 
   /* 櫛の根元の一枚板（鋼）と、それを載せる台（真鍮）。歯は曲ごとに作り直す */
   const TIP_Z = CYL_Z + R + .2 - .03, TIP_Y = .05, TL = 2.4;
@@ -1872,15 +1955,6 @@ const orgel = (()=>{
     const sc = new THREE.Mesh(new THREE.CylinderGeometry(.13, .13, .06, 14), brass); sc.name = 'CombScrew_' + (x < 0 ? 'L' : x > 0 ? 'R' : 'C');
     sc.position.set(x, TIP_Y + .11, COMB_ROOT + .55); mech.add(sc); addOutline(sc, .012, OUT_MECH);
   });
-
-  /* ゼンマイの香箱 */
-  const barrel = new THREE.Group(); barrel.position.set(-2.4, -1.625, -3.2); mech.add(barrel);
-  const drumB = new THREE.Mesh(new THREE.CylinderGeometry(.95, .95, 1.25, 32), brassDk);
-  drumB.position.y = .625; barrel.add(drumB); addOutline(drumB, .025, OUT_MECH);
-  const ratchet = new THREE.Mesh(gearGeo(.6, 16, .1, .1), brass);
-  ratchet.rotation.z = Math.PI/2; ratchet.position.y = 1.3; barrel.add(ratchet); addOutline(ratchet, .015, OUT_MECH);
-  const click = obox(.5, .08, .12, steelDk, -2.4 + .75, -1.625 + 1.34, -3.2 + .45, mech, .012);
-  click.rotation.y = .5;
 
   /* 仮の箱（ユーザーの .glb が届いたら差し替える） */
   const wood = inToon(0x6f4a3c), woodDk = inToon(0x533427), inlay = inToon(0xd6bd96), lining = inToon(0xa6c0c8);
@@ -2024,6 +2098,7 @@ const orgel = (()=>{
   let lastPos = 0;
   const _pm = new THREE.Matrix4(), _ps = new THREE.Vector3();
   const struck = [];   // このフレームで弾いた歯（音符の発生に使う）
+  let lastAng = 0, trainAng = 0, gwStep = 0;
   function update(dt){
     const pos = song.started ? song.pos : lastPos;
     struck.length = 0;
@@ -2037,11 +2112,13 @@ const orgel = (()=>{
     }
     const ang = pos/loopSec*Math.PI*2;
     cyl.rotation.x = -ang;
-    const w2 = ang*(1.3/.45);
-    shaft2.rotation.x = w2;
-    shaft3.rotation.x = -w2*(.8/.3);
-    fan.rotation.x = -w2*(.8/.3)*5;
-    barrel.rotation.y = -ang*.4;
+    // 輪列：シリンダーの回った分（一周の継ぎ目と曲の切り替えの飛びは除く）を歯数の比で配る
+    let dA = ang - lastAng; dA = Math.atan2(Math.sin(dA), Math.cos(dA)); if(Math.abs(dA) > .5) dA = 0; lastAng = ang;
+    trainAng += dA;
+    shaft2.rotation.x = trainAng*(N_BG/N_P2);                    // 大歯車と逆向き
+    gov.rotation.y = -trainAng*(N_BG/N_P2)*N_W2;                 // ウォームと羽根（1 条：中間車 1 歯で 1 回転）
+    gwStep = dA*(N_BG/N_GW);                                     // 香箱車：シリンダーと逆向き。鍵と軸も同じだけ回る（updateWindKey）
+    greatWheel.rotation.x += gwStep;
     if(pins){
       const actT = song.started && isPlaying ? Math.min(1, song.speed) : 0;   // 止まっている間は光らせない
       pinAct += (actT - pinAct)*(1 - Math.exp(-dt/(actT < pinAct ? .7 : .12)));   // 消えるときはゆっくり、点くときは素早く
@@ -2078,27 +2155,32 @@ const orgel = (()=>{
   }
   /* 部品の名前（FBX 書き出し用。Maya で読んだときの名前になる） */
   mechRoot.name = 'MechRoot'; mech.name = 'Mechanism'; cyl.name = 'Cylinder'; drum.name = 'Drum'; axle.name = 'Axle';
-  bigGear.name = 'Gear1_Big'; sidePlate.name = 'SidePlate_R'; shaft2.name = 'Gear2'; pin2.name = 'Gear2_Pinion'; g2.name = 'Gear2_Wheel'; a2.name = 'Gear2_Shaft';
-  shaft3.name = 'Gear3'; pin3.name = 'Gear3_Pinion'; a3.name = 'Gear3_Shaft'; fan.name = 'Fan';
-  barrel.name = 'Barrel'; drumB.name = 'Barrel_Drum'; ratchet.name = 'Barrel_Ratchet'; click.name = 'Barrel_Click';
+  bigGear.name = 'Gear1_Big'; sidePlate.name = 'SidePlate_R'; bridgePlate.name = 'Bridge_R';
+  shaft2.name = 'Gear2'; pin2.name = 'Gear2_Pinion'; g2.name = 'Gear2_Wheel'; a2.name = 'Gear2_Shaft';
+  gov.name = 'Governor'; fan.name = 'Fan';
+  barrel.name = 'Barrel'; drumB.name = 'Barrel_Drum'; arbor.name = 'Barrel_Arbor'; ratchet.name = 'Barrel_Ratchet';
+  greatWheel.name = 'GreatWheel'; gwGear.name = 'GreatWheel_Gear'; click.name = 'GreatWheel_Click'; clickPin.name = 'GreatWheel_ClickPin';
   boxRoot.name = 'Box'; keyhole.name = 'Keyhole'; lidPivot.name = 'Lid'; lin.name = 'Lid_Lining'; combGroup.name = 'Comb';
   fan.children.forEach((c, i)=>{ if(c.isMesh) c.name = i === 0 ? 'Fan_Hub' : 'Fan_Blade_' + i; });
+  barrel.children.forEach((c, i)=>{ if(c.isMesh && !c.name && c !== drumB) c.name = 'Barrel_Rim_' + i; });
   setTrack(TRACKS[0]);
-  return { update, setTrack, tipWorld, struck, get teeth(){ return teeth; },
+  return { update, setTrack, tipWorld, struck, arbor, get gwStep(){ return gwStep; }, get teeth(){ return teeth; },
     exportParts:()=>{
       if(pins) notes.forEach((nt, i)=>{ _pm.compose(nt.P, nt.Q, _ps.setScalar(1)); pins.setMatrixAt(i, _pm); nt.big = false; });
-      return { cyl, shaft2, shaft3, fan, barrel, lidPivot, pins, teeth, PIN_BASE };
+      return { cyl, shaft2, gov, greatWheel, arbor, lidPivot, pins, teeth, PIN_BASE };
     } };
 })();
 
 /* ---- 巻き鍵（仮の箱の右側面。箱を差し替えるときはユーザーのモデルの鍵に替える）。タップでゼンマイを巻く ----
-   軸（x 方向）とつまみ（蝶の羽の形）。再生中はゆっくり逆に回り、ほどけていく様子を見せる。巻くとくるっと回る */
+   軸（x 方向）とつまみ（蝶の羽の形）。香箱の軸の延長にあり（右の壁を抜けて中の軸につながる）、軸と一緒に回る。
+   巻くと手前へ回る。鳴っている間は香箱車と同じ速さでゆっくり逆へ回る（ゼンマイが軸を戻し、爪車が香箱車を押すため） */
 const windKey = (()=>{
   const box = orgelRoot.getObjectByName('Box_Right');
   const outX = box.position.x + box.geometry.parameters.width/2;   // 右側面の外の面
   const brass = inToon(0xa98549);
   const g = new THREE.Group(); g.name = 'WindKey';
-  g.position.set(outX, 2.2, 0); orgelRoot.getObjectByName('Box').add(g);
+  const arb = orgelRoot.getObjectByName('Barrel_Arbor'), mechObj = orgelRoot.getObjectByName('Mechanism');
+  g.position.set(outX, mechObj.position.y + arb.position.y, arb.position.z); orgelRoot.getObjectByName('Box').add(g);   // 香箱の軸の真横
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.15, .15, .9, 10), brass); shaft.rotation.z = Math.PI/2; shaft.position.x = .45; g.add(shaft); shaft.name = 'WindKey_Shaft';
   addOutline(shaft, .02, OUT_MECH);
   const bow = new THREE.Group(); bow.position.x = .95; g.add(bow);
@@ -2115,7 +2197,8 @@ const windKey = (()=>{
 })();
 function updateWindKey(dt){
   if(springKeySpin > 0){ const d = Math.min(springKeySpin, dt*Math.max(9, springKeySpin*6)); springKeySpin -= d; windKey.g.rotation.x -= d; }   // 巻く：手前へくるっと
-  else if(isPlaying && song.started && !springOut) windKey.g.rotation.x += dt*.35*song.speed;                       // ほどける：ゆっくり逆へ
+  windKey.g.rotation.x += orgel.gwStep;   // 鳴っている間：香箱車と一緒にゆっくり逆へ
+  orgel.arbor.rotation.x = windKey.g.rotation.x;   // 中の軸と爪車は鍵と一緒に回る
 }
 function pickWindKey(clientX, clientY){
   _keyNdc.set(clientX/window.innerWidth*2 - 1, -(clientY/window.innerHeight)*2 + 1);
@@ -3202,7 +3285,7 @@ if(PARAMS.has('export')){
     const isOutline = m=>m.isMeshBasicMaterial && m.side === THREE.BackSide;
     const K = ORGEL_SCALE;
     // 静止の姿勢
-    const saved = [P.cyl, P.shaft2, P.shaft3, P.fan, P.barrel, P.lidPivot, ...P.teeth.map(t=>t.pivot)].map(o=>[o, o.rotation.clone()]);
+    const saved = [P.cyl, P.shaft2, P.gov, P.greatWheel, P.arbor, windKey.g, P.lidPivot, ...P.teeth.map(t=>t.pivot)].map(o=>[o, o.rotation.clone()]);
     for(const [o] of saved) o.rotation.set(0, 0, 0);
     orgelRoot.updateMatrixWorld(true);
     const counter = {};
