@@ -19,7 +19,7 @@
   body{
     margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
     font-family:'Zen Maru Gothic',"Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif;
-    touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent;
+    touch-action:none; -webkit-user-select:none; -webkit-touch-callout:none; user-select:none; -webkit-tap-highlight-color:transparent;
   }
   #c{ position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
   #paper{
@@ -1546,14 +1546,16 @@ function prevTrack(){ playTrack((currentTrackIdx-1+TRACKS.length) % TRACKS.lengt
 function windDown(){ if(isPlaying && !song.winding){ song.winding = true; song.windT = 0; } }
 
 /* ---- ゼンマイ（おやすみタイマー） ----
-   既定は巻きっぱなし（∞）で止まらない（作業 BGM 向け）。再生パネルの「🗝」か、オルゴールの巻き鍵をタップするたびに
-   ∞→15分→30分→60分 と巻き直す。時間が来たら windDown（テンポが落ちて静かに止まる）。
-   残りは AudioContext の時計で数える（画面を閉じても正しく減る）。一時停止中は減らない。曲送り・全曲でも続けて減る。
-   切れた後に再生すると、巻き直す音を聞かせてから同じ長さで鳴り出す。撮影モードでは使わない */
+   既定は巻きっぱなし（∞）で止まらない（作業 BGM 向け）。
+   オルゴールの巻き鍵：1回タップで「カチッ」と1つ巻いて +1分。押したままにすると巻き続け、カチッの間隔がだんだん詰まる
+   （1つは常に +1分。1時間は長押し 5〜6 秒）。上限 60分で止まる手応えを鳴らして、それ以上は巻けない。∞ のときに巻くと 0 から数え始める。
+   再生パネルの「🗝」ボタン：∞ ⇄ タイマーの切り替え（∞→前に巻いた長さ（初めは15分）、タイマー→∞）。減らす操作は無い（本物のゼンマイと同じ）。
+   時間が来たら windDown（テンポが落ちて静かに止まる）。残りは AudioContext の時計で数える（画面を閉じても正しく減る）。
+   一時停止中は減らない。曲送り・全曲でも続けて減る。切れた後に再生すると、巻き直す音を聞かせてから前に巻いた長さで鳴り出す。撮影モードでは使わない */
 const SPRING_PUBLIC = true;                  // 公開版にも出すか（false にして公開版を作り直せば隠せる）
 const SPRING_ON = DEV || SPRING_PUBLIC;      // false のときはボタンと巻き鍵を出さない（巻きっぱなしのまま）
-const SPRING_STEPS = [Infinity, 15*60, 30*60, 60*60];
-let springIdx = 0, springLeft = Infinity, springEndAt = Infinity, springOut = false, springKeySpin = 0;
+const SPRING_MAX = 60*60, SPRING_CLICK = 60;  // 上限、1カチッで足す秒
+let springLeft = Infinity, springEndAt = Infinity, springOut = false, springKeySpin = 0, springLast = 15*60;
 function springResume(startAt){ springEndAt = isFinite(springLeft) ? startAt + springLeft : Infinity; }
 function springPause(){
   if(isFinite(springEndAt) && audioCtx) springLeft = Math.max(0, springEndAt - audioCtx.currentTime);
@@ -1563,15 +1565,51 @@ function springCheck(){   // 時間が来たか（毎コマと 1 秒ごとに見
   if(!isPlaying || song.winding || !isFinite(springEndAt) || !audioCtx) return;
   if(audioCtx.currentTime >= springEndAt){ springLeft = 0; springOut = true; windDown(); }
 }
-function setSpring(idx){
-  springIdx = idx; springOut = false; springLeft = SPRING_STEPS[idx];
-  springEndAt = Infinity;
-  if(isPlaying && audioCtx){ song.winding = false; song.speed = 1; springResume(audioCtx.currentTime); }   // 切れかけでも巻けば戻る
-  windSfx(); springKeySpin += Math.PI*2*.75;
+function springSet(sec){   // 残りを sec にする（∞ も可）。切れかけ・切れた後でも巻けば戻る
+  springOut = false; springLeft = sec; springEndAt = Infinity;
+  if(isPlaying && audioCtx){ song.winding = false; song.speed = 1; springResume(audioCtx.currentTime); }
   updateSpringBtn();
 }
-function cycleSpring(){ setSpring((springIdx + 1) % SPRING_STEPS.length); }
-function rewindSpring(){ springOut = false; springLeft = SPRING_STEPS[springIdx]; const d = windSfx(2); springKeySpin += Math.PI*2*1.5; updateSpringBtn(); return d; }   // 切れた後はしっかり2回巻く。鳴り終わるまでの秒を返す
+function toggleSpring(){   // パネルのボタン：∞ ⇄ タイマー
+  springSet(isFinite(springLeftNow()) ? Infinity : springLast);
+  windSfx(); springKeySpin += Math.PI*2*.75;
+}
+// 巻き鍵の長押し：1カチッ +1分。間隔は 0.26 秒から詰まって 0.06 秒まで（長押しを始めて約 2.5 秒で最速）
+let springHold = null;   // { id, t0, n, timer }
+function springTick(){
+  const h = springHold; if(!h) return;
+  const cur = springLeftNow(), base = isFinite(cur) && !springOut ? cur : 0;
+  if(base >= SPRING_MAX - 1){ springWindEnd(true); return; }
+  const left = Math.min(SPRING_MAX, base + SPRING_CLICK);
+  springSet(left); springLast = Math.round(left/60)*60 || SPRING_CLICK;
+  const ctx = ensureAudioCtx();
+  if(ctx){
+    if(ctx.state === 'suspended') ctx.resume();
+    ensureSfx();
+    const prog = left/SPRING_MAX;   // 巻くほど硬く強く
+    windClick(ctx, sfxGain, ctx.currentTime + .005, prog, (.34 + .26*prog)*(.8 + Math.random()*.4));
+  }
+  springKeySpin += Math.PI/6;   // 1カチッ 30°
+  h.n++;
+  if(left >= SPRING_MAX){ springWindEnd(true); return; }
+  const held = performance.now() - h.t0;
+  const iv = h.n === 1 ? 400 : Math.max(60, 260 - 200*Math.min(1, held/2500));   // 1つ目の後は少し待つ（タップと長押しを分ける）
+  h.timer = setTimeout(springTick, iv*(.88 + Math.random()*.24));
+}
+function springWindStart(id){
+  springWindEnd(false);
+  springHold = { id, t0:performance.now(), n:0, timer:0 };
+  springTick();
+}
+function springWindEnd(full){   // 手を離した（full：上限に着いた）
+  const h = springHold; if(!h) return;
+  clearTimeout(h.timer); springHold = null;
+  if(h.n > 1 || full){   // 長押しの後は止まる手応え。上限は強め
+    const ctx = ensureAudioCtx();
+    if(ctx){ ensureSfx(); windClick(ctx, sfxGain, ctx.currentTime + (full ? .09 : .05), .5, full ? .8 : .5, true); }
+  }
+}
+function rewindSpring(){ springOut = false; springLeft = springLast; const d = windSfx(2); springKeySpin += Math.PI*2*1.5; updateSpringBtn(); return d; }   // 切れた後はしっかり2回巻く。鳴り終わるまでの秒を返す
 function springLeftNow(){ return isFinite(springEndAt) && audioCtx ? Math.max(0, springEndAt - audioCtx.currentTime) : springLeft; }
 function updateSpringBtn(){
   const b = document.getElementById('springBtn'); if(!b) return;
@@ -1701,8 +1739,9 @@ listBtn.addEventListener('click', ()=>{ renderTrackList(); listModal.classList.a
 listCloseBtn.addEventListener('click', ()=>listModal.classList.remove('show'));
 listModal.addEventListener('click', e=>{ if(e.target === listModal) listModal.classList.remove('show'); });
 modeBtn.addEventListener('click', cyclePlayMode);
-document.getElementById('springBtn').addEventListener('click', cycleSpring);
+document.getElementById('springBtn').addEventListener('click', toggleSpring);
 if(!SPRING_ON) document.getElementById('springBtn').style.display = 'none';
+window.addEventListener('blur', ()=>springWindEnd(false));   // 押したまま画面を離れたら巻くのをやめる
 document.addEventListener('visibilitychange', ()=>{
   if(!document.hidden && audioCtx && audioCtx.state === 'suspended' && isPlaying) audioCtx.resume();
 });
@@ -2075,7 +2114,7 @@ const windKey = (()=>{
   return { g, hit };
 })();
 function updateWindKey(dt){
-  if(springKeySpin > 0){ const d = Math.min(springKeySpin, dt*9); springKeySpin -= d; windKey.g.rotation.x -= d; }   // 巻く：手前へくるっと
+  if(springKeySpin > 0){ const d = Math.min(springKeySpin, dt*Math.max(9, springKeySpin*6)); springKeySpin -= d; windKey.g.rotation.x -= d; }   // 巻く：手前へくるっと
   else if(isPlaying && song.started && !springOut) windKey.g.rotation.x += dt*.35*song.speed;                       // ほどける：ゆっくり逆へ
 }
 function pickWindKey(clientX, clientY){
@@ -2960,7 +2999,7 @@ if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
   window.__spring = { live:()=>windSfxLive, render:async grips=>{   // 巻く音だけをオフラインで書き出す（確認用）
       const off = new OfflineAudioContext(1, 48000*3, 48000); const g = off.createGain(); g.gain.value = .9; g.connect(off.destination);
       const end = windPattern(off, g, .05, grips); const buf = await off.startRendering(); return { end, data:Array.from(buf.getChannelData(0).subarray(0, Math.ceil((end + .3)*48000))) }; },
-    cycle:cycleSpring, left:springLeftNow, out:()=>springOut, idx:()=>springIdx, shorten:sec=>{ if(isFinite(springEndAt)) springEndAt = audioCtx.currentTime + sec; } };
+    toggle:toggleSpring, wind:id=>springWindStart(id ?? 'dbg'), release:()=>springWindEnd(false), holding:()=>!!springHold, left:springLeftNow, out:()=>springOut, shorten:sec=>{ if(isFinite(springEndAt)) springEndAt = audioCtx.currentTime + sec; } };
   window.__bird = { setVoice:v=>setBirdVoice(v), touch:i=>touchBird(birds[i], birds[i].model.position.clone()), setT:t=>{ dayT = t; }, phrase:()=>phraseCount,
     snap:()=>birds.map(b=>[b.id, b.mode, b.singing ? (b.mode === 'hover' ? 'HOVER' : b.anim) : b.anim, b.seated ? 'seated' : '']), forceHover:()=>{ hoverCool = 0; }, dbg:()=>({ hoverCool, lastBar, lastPhrase, started:song.started, voice:birdVoice, day:isDay() }), arrive:i=>beginArrive(birds[i]), leave:i=>beginLeave(birds[i]), dbgT:()=>dayT, texKeys:()=>Object.keys(birdTexCache), ids:()=>birds.map(b=>b.id + '×' + b.model.scale.x) };
 }
@@ -3054,7 +3093,9 @@ let lastPinch = 0, lastMid = null;
 canvas.addEventListener('pointerdown', e=>{
   const panBtn = e.pointerType === 'mouse' && (e.button === 2 || e.button === 1);
   logInput(`pointerdown type=${e.pointerType} button=${e.button} buttons=${e.buttons} → ${panBtn ? '移動' : '回す'}`);
-  if(SPRING_ON && pointers.size === 0 && !panBtn && !CAPTURE && pickWindKey(e.clientX, e.clientY)){ cycleSpring(); hideHint(); return; }   // 巻き鍵
+  if(SPRING_ON && pointers.size === 0 && !panBtn && !CAPTURE && pickWindKey(e.clientX, e.clientY)){   // 巻き鍵：押している間巻く
+    canvas.setPointerCapture(e.pointerId); springWindStart(e.pointerId); hideHint(); return;
+  }
   const hit = pointers.size === 0 && !panBtn ? pickBird(e.clientX, e.clientY) : null;
   if(hit){ touchBird(hit.bird, hit.point); hideHint(); return; }
   canvas.setPointerCapture(e.pointerId);
@@ -3080,7 +3121,7 @@ canvas.addEventListener('pointermove', e=>{
   }
   clampO();
 });
-function endPointer(e){ pointers.delete(e.pointerId); lastPinch = 0; lastMid = null; }
+function endPointer(e){ if(springHold && springHold.id === e.pointerId) springWindEnd(false); pointers.delete(e.pointerId); lastPinch = 0; lastMid = null; }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('contextmenu', e=>e.preventDefault());    // 右ドラッグの邪魔をさせない
