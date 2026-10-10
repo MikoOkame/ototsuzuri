@@ -1242,6 +1242,49 @@ function trackNode(node){
 /* オルゴールの高音の抑え：耳は 2〜5kHz がいちばん敏感で、同じ音量でも高い音ほど刺さる。
    MB_HI_HZ（ファ6）より上は、高くなるほど本体を弱め、倍音（2倍）はさらに強く弱める。?mbhi=0 で抑え無し（聞き比べ用） */
 const MB_HI_HZ = 1400, MB_HI = PARAMS.get('mbhi') !== '0';
+/* 音色2（?tone=2 で聞き比べ。既定は今までの音色1）。調べた資料に合わせた作り：
+   ・2倍と3倍の上の音：実物のオルゴール（603Hz の歯）を測ると、基音から 2倍が -24dB、3倍が -16dB（英国オルゴール協会の会誌。要約のみで原文は未確認）。
+     基音より少し早く消す（消える速さの実測は見つからなかったので推測）
+   ・約6.27倍の音：片端を固定した板の2番目の振動（梁の理論）。弾いた瞬間だけ鳴り 0.07 秒ほどで消える（カリンバの測定で、整数倍でない上の音はすぐ消える）
+   ・ピンが歯を弾く「ピッ」：雑音の粒（ゼンマイのカチッと同じバッファ）を高めの帯域に通して 5ms ほど
+   ・高い音の抑え（MB_HI_HZ）は上の音ほど強く効かせる */
+const MB_TONE = PARAMS.get('tone') === '2' ? 2 : 1;
+function playMusicBoxNote2(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi);
+  const hi = MB_HI && freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;
+  const peak = clampNum(vel/127,.05,1)*.5*hi, attack = .006, release = Math.min(dur*2.4+.3, 2);
+  const stopAt = startTime + attack + release + .05;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + release);
+  g.connect(masterGain); sendToReverb(g, .5);
+  const parts = [g];
+  const osc0 = trackNode(ctx.createOscillator()); osc0.type = 'sine'; osc0.frequency.value = freq; osc0.connect(g);
+  osc0.start(startTime); osc0.stop(stopAt);
+  // 上の音：[倍率, 基音に対する強さ, 消えるまでの秒]。それぞれ自分の包絡を持ち、基音の包絡（g）は通さず直接出す
+  const overs = [[2.0, .063*hi, release*.6], [3.0, .158*hi*hi, release*.45], [6.27, .3*hi*hi, .07]];
+  for(const [ratio, amp, life] of overs){
+    const f = freq*ratio; if(f > 15000 || amp < .002) continue;
+    const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
+    const og = ctx.createGain(), a = peak*amp;
+    og.gain.setValueAtTime(.0001, startTime);
+    og.gain.exponentialRampToValueAtTime(a, startTime + attack*.5);
+    og.gain.exponentialRampToValueAtTime(.0001, startTime + attack*.5 + life);
+    o.connect(og); og.connect(masterGain); sendToReverb(og, .5); parts.push(og);
+    o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + life + .05));
+  }
+  // ピン：雑音の粒
+  const n = ctx.createBufferSource(); n.buffer = windNoise(ctx);
+  const ng = ctx.createGain(), bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+  bp.frequency.value = Math.min(9000, 3500 + freq*1.5); bp.Q.value = 1.2;
+  ng.gain.setValueAtTime(.0001, startTime);
+  ng.gain.exponentialRampToValueAtTime(peak*.5, startTime + .0008);
+  ng.gain.exponentialRampToValueAtTime(.0001, startTime + .006);
+  n.connect(bp); bp.connect(ng); ng.connect(masterGain); parts.push(bp, ng);
+  n.start(startTime, Math.random()*.03, .012); trackNode(n);
+  osc0.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
 function playMusicBoxNote(startTime, midi, dur, vel){
   const freq = midiToFreq(midi);
   const hi = MB_HI && freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;   // ラ6 で 0.8、ド7 で 0.67、ファ7 で 0.5
@@ -1385,7 +1428,7 @@ function playStringsNote(startTime, midi, dur, vel){
   g.connect(masterGain); sendToReverb(g, .6);
   oscs[0].addEventListener('ended', ()=>{ g.disconnect(); gSum.disconnect(); filter.disconnect(); });
 }
-const INSTRUMENTS = { musicbox:playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
+const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
   flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
 const PARTS = ['melody','arp','pad','bass','bell','strings'];
