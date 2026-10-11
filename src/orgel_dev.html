@@ -73,6 +73,26 @@
     border:1px solid transparent; border-image-source:var(--frame-img);
     border-image-width:var(--frame-corner); border-image-repeat:round;   /* border-image-slice は JS が隅×3 で入れる */
   }
+  /* 飾りの外枠（手描き）：左右の唐草（LINE.png、右は左右反転）、上の角に燕（bird.png、左は左右反転）、上下の金の線。
+     画像が両方読めたときだけ #player に .ornate を付ける（無いあいだは今の枠） */
+  #player.ornate{ --gold:#b68f50; border:0; border-radius:12px; padding:20px 30px 12px; overflow:visible; }
+  #player .orn{ position:absolute; pointer-events:none; display:none; }
+  #player.ornate .orn{ display:block; }
+  #player .orn-side{ top:-4px; height:calc(100% + 8px); width:auto; }
+  #player .orn-l{ left:-13px; }
+  #player .orn-r{ right:-13px; transform:scaleX(-1); }
+  #player .orn-bird{ top:-30px; width:56px; height:auto; }
+  #player .orn-bl{ left:14px; transform:scaleX(-1); }
+  #player .orn-br{ right:14px; }
+  #player .orn-line{ height:0; border-top:1.5px solid var(--gold); }
+  #player .orn-top{ top:0; left:74px; right:74px; }
+  #player .orn-bot{ bottom:0; left:22px; right:22px; }
+  /* まだ絵の無いボタン（鳥の声・消音）は、金の縁取りと文字で絵に寄せる */
+  #player.ornate #modeBtn:not(.hasIcon), #player.ornate #birdBtn:not(.hasIcon){ color:var(--gold); border:1.5px solid var(--gold); border-radius:8px; font-family:Georgia,'Times New Roman',serif; font-weight:700; height:34px; padding:0 9px; }
+  #player.ornate #muteBtn:not(.hasIcon){ color:var(--gold); }
+  #player.ornate #muteBtn.hasIcon.isMuted{ opacity:.4; }   /* 消音の絵が無いあいだは、音ありの絵を薄くして見せる */
+  #player.ornate #springBtn.hasIconText{ color:var(--gold); font:700 11px/1 Georgia,'Times New Roman',serif; }
+  #player.ornate #volSlider{ accent-color:var(--gold); }
   /* 手描きのボタン：ボタン全体を画像で描く（円・縁取り・地の色も画像の中）。CSS の縁取りと地の色は消す */
   /* ボタンごとの指定（#playBtn の background 一括指定など）に負けないよう !important で上書きする */
   button.hasIcon{ font-size:0 !important; color:transparent !important; padding:0 !important; border:0 !important; border-radius:0 !important;
@@ -102,7 +122,7 @@
   #subRow{ display:flex; align-items:center; gap:10px; margin-top:6px; }
   /* ゼンマイの手描きボタン：絵は背景、残り時間の文字は右側に重ねる */
   #springBtn.hasIconText{ border:0 !important; border-radius:0 !important; background-color:transparent !important;
-    background-size:100% 100%; background-repeat:no-repeat; padding:0 9px 0 29px !important; text-align:center; line-height:29px; }
+    background-size:100% 100%; background-repeat:no-repeat; padding:0 4px 0 27px !important; text-align:center; }
   #modeBtn, #birdBtn, #springBtn{ font-family:inherit; font-size:12px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:5px 10px; cursor:pointer; white-space:nowrap; }
   #muteBtn{ font-size:16px; background:transparent; border:0; color:var(--ink); cursor:pointer; }
   #volSlider{ flex:1 1 0; min-width:0; accent-color:var(--accent); }   /* ボタンが増えても枠からはみ出さないように縮める */
@@ -116,8 +136,8 @@
   .tTitle{ font-size:14px; font-weight:700; }
   .tSub{ font-size:11px; color:var(--ink-dim); }
   .modalCloseBtn{ margin-top:10px; width:100%; font-family:inherit; font-size:13px; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:8px; cursor:pointer; }
-  #hint{ bottom:calc(192px + env(safe-area-inset-bottom,0px)); }
-  #dbg{ bottom:calc(186px + env(safe-area-inset-bottom,0px)); }
+  #hint{ bottom:calc(222px + env(safe-area-inset-bottom,0px)); }   /* 飾りの燕がパネルの上にはみ出す分だけ上げる */
+  #dbg{ bottom:calc(216px + env(safe-area-inset-bottom,0px)); }
   /* フレームレート表示（?fps のときだけ。制作用。公開時はこの1行と、末尾の「フレームレート表示」節を外す） */
   #fps{ position:fixed; left:8px; top:calc(52px + env(safe-area-inset-top,0px)); z-index:30; font:11px/1.3 ui-monospace,Menlo,monospace; color:#fff; background:rgba(10,8,24,.72); border-radius:6px; padding:4px 7px; pointer-events:none; white-space:pre; }
   /* 撮影中は UI を出さない（紙目と周辺減光は絵の一部なので残す） */
@@ -1662,7 +1682,7 @@ function updateSpringBtn(){
   const txt = (hasArt ? '' : '🗝 ') + time;
   if(hasArt && !b.classList.contains('hasIconText')){
     const [, w, h] = ICON_FILES.spring;
-    b.classList.add('hasIconText'); b.style.backgroundImage = `url("${ICONS.spring}")`; b.style.width = w + 'px'; b.style.height = h + 'px';
+    b.classList.add('hasIconText'); b.style.backgroundImage = `url("${ICONS.spring}")`; b.style.width = w + 'px'; b.style.height = h + 'px'; b.style.lineHeight = h + 'px';
   }
   if(b.textContent !== txt){ b.textContent = txt; b.setAttribute('aria-label', 'ゼンマイ ' + (isFinite(left) ? '残り' + Math.max(1, Math.ceil(left/60)) + '分' : '巻きっぱなし')); }
 }
@@ -1716,7 +1736,7 @@ function windSfx(grips=1){
 }
 setInterval(()=>{ springCheck(); updateSpringBtn(); }, 1000);
 function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
-function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊'); }
+function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; refreshMuteIcon(); }
 function cyclePlayMode(){
   playMode = playMode === 'single' ? 'all' : (playMode === 'all' ? 'shuffle' : 'single');
   updateModeBtn();
@@ -1729,9 +1749,9 @@ function cyclePlayMode(){
    画像は表示サイズの3倍で描く。ボタン全体（円・縁取り・地）を描く。寸法の一覧は orgel_handoff.md §7 */
 const ICON_FILES = {   // key: [ファイル名, 表示の幅, 高さ]
   play:['icon_play.png', 54, 54], pause:['icon_pause.png', 54, 54], prev:['icon_prev.png', 44, 44], next:['icon_next.png', 44, 44],
-  list:['icon_list.png', 90, 38], modeSingle:['icon_mode_single.png', 59, 29], modeAll:['icon_mode_all.png', 59, 29], modeShuffle:['icon_mode_shuffle.png', 59, 29],
-  birdOn:['icon_bird_on.png', 52, 29], birdOff:['icon_bird_off.png', 52, 29], unmute:['icon_unmute.png', 32, 21], mute:['icon_mute.png', 32, 21],
-  spring:['icon_spring.png', 76, 29],   // ゼンマイ：ボタン全体の絵。残り時間の文字はアプリが右側に重ねる（絵の左 29×29 に鍵、右は文字用に空ける）
+  list:['icon_list.png', 90, 38], modeSingle:['icon_mode_single.png', 59, 34], modeAll:['icon_mode_all.png', 59, 34], modeShuffle:['icon_mode_shuffle.png', 59, 34],
+  birdOn:['icon_bird_on.png', 52, 29], birdOff:['icon_bird_off.png', 52, 29], unmute:['icon_unmute.png', 22, 23], mute:['icon_mute.png', 22, 23],   // 音あり・消音はユーザーの見本の大きさ（絵は 96×101）
+  spring:['icon_spring.png', 59, 34],   // ゼンマイ：ボタン全体の絵。残り時間の文字はアプリが右側に重ねる（絵の左 3 分の 1 に鍵、右は文字用に空ける）
 };
 const ICON_DIR = PARAMS.get('icondir') || ROOT + 'assets/ui/';   // ?icondir= は確認用
 const ICONS = {};                                             // 読み込めた画像の URL
@@ -1792,11 +1812,32 @@ updateModeBtn(); setVolume(volSlider.value/100); updateNowPlaying();
 function refreshPlayerIcons(){
   updatePlayBtn(); updateModeBtn();
   setIcon(prevBtn, 'prev', '⏮'); setIcon(nextBtn, 'next', '⏭'); setIcon(listBtn, 'list', '🎵 曲一覧');
-  setIcon(muteBtn, muted ? 'mute' : 'unmute', muted ? '🔇' : '🔊');
+  refreshMuteIcon();
+}
+function refreshMuteIcon(){   // 消音の絵が無いあいだは、音ありの絵を薄くして使う（文字の 🔇 だと絵の中で浮く）
+  setIcon(muteBtn, muted && (ICONS.mute || !ICONS.unmute) ? 'mute' : 'unmute', muted ? '🔇' : '🔊');
+  muteBtn.classList.toggle('isMuted', muted);
 }
 iconRefresh.push(refreshPlayerIcons);
 iconRefresh.push(updateSpringBtn);
 refreshPlayerIcons();
+/* 飾りの外枠：唐草と燕の絵が両方読めたら組み立てる（?icondir= の場所から読む） */
+{
+  const player = document.getElementById('player');
+  const srcs = { side:ICON_DIR + 'LINE.png', bird:ICON_DIR + 'bird.png' };
+  let left = 2;
+  const add = (cls, tag, src)=>{ const e = document.createElement(tag); e.className = 'orn ' + cls; if(src){ e.src = src; e.alt = ''; } player.appendChild(e); };
+  for(const k in srcs){
+    const img = new Image();
+    img.onload = ()=>{ if(--left) return;
+      add('orn-line orn-top', 'div'); add('orn-line orn-bot', 'div');
+      add('orn-side orn-l', 'img', srcs.side); add('orn-side orn-r', 'img', srcs.side);
+      add('orn-bird orn-bl', 'img', srcs.bird); add('orn-bird orn-br', 'img', srcs.bird);
+      player.classList.add('ornate');
+    };
+    img.src = srcs[k];
+  }
+}
 /* 外枠の画像：あれば当てる。無ければ（読み込み失敗なら）今の枠のまま */
 const FRAME_SRC = PARAMS.get('frame') || ROOT + 'assets/ui/player_frame.png';   // ?frame= は確認用
 const FRAME_SCALE = 3;                                                      // 画像は表示サイズの3倍で描く
