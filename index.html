@@ -1971,12 +1971,12 @@ const orgel = (()=>{
   sidePlate.position.set(X_PLATE, 0, 0); mech.add(sidePlate); addOutline(sidePlate, .025, OUT_MECH);
   /* 外側の受け板：香箱の軸・シリンダーの軸・中間車の軸の外端を、細い腕でつないで受ける（歯車を隠さない）。足は台座へ */
   const bridgePlate = new THREE.Group(); bridgePlate.position.x = X_BRIDGE; mech.add(bridgePlate);
-  { const pts = [ARB, CYL_C, G2];   // (y, z)
-    const boss = p=>{ const m = new THREE.Mesh(new THREE.CylinderGeometry(.28, .28, .15, 16), brassDk); m.rotation.z = Math.PI/2; m.position.set(0, p.x, p.y); bridgePlate.add(m); addOutline(m, .015, OUT_MECH); };
-    const bar = (p, q, w)=>{ const len = p.distanceTo(q); const m = new THREE.Mesh(new THREE.BoxGeometry(.15, w, len), brassDk);
+  {   // 点は (y, z)
+    const boss = (p, name)=>{ const m = new THREE.Mesh(new THREE.CylinderGeometry(.28, .28, .15, 16), brassDk); m.name = 'Bridge_R_Boss_' + name; m.rotation.z = Math.PI/2; m.position.set(0, p.x, p.y); bridgePlate.add(m); addOutline(m, .015, OUT_MECH); };
+    const bar = (p, q, w, name)=>{ const len = p.distanceTo(q); const m = new THREE.Mesh(new THREE.BoxGeometry(.15, w, len), brassDk); m.name = 'Bridge_R_' + name;
       m.position.set(0, (p.x + q.x)/2, (p.y + q.y)/2); m.rotation.x = -Math.atan2(q.x - p.x, q.y - p.y); bridgePlate.add(m); addOutline(m, .015, OUT_MECH); };
-    pts.forEach(boss); bar(ARB, CYL_C, .32); bar(CYL_C, G2, .32);
-    [ARB, CYL_C].forEach(p=>bar(p, new THREE.Vector2(-1.625, p.y), .3));   // 足
+    boss(ARB, 'Arbor'); boss(CYL_C, 'Cylinder'); boss(G2, 'Gear2'); bar(ARB, CYL_C, .32, 'Arm_Back'); bar(CYL_C, G2, .32, 'Arm_Front');
+    bar(ARB, new THREE.Vector2(-1.625, ARB.y), .3, 'Leg_Back'); bar(CYL_C, new THREE.Vector2(-1.625, CYL_C.y), .3, 'Leg_Front');   // 足
   }
   /* 香箱（ゼンマイの入れ物）。動かない。側板の内側、シリンダーの後ろ。台座へ脚で留める */
   const barrel = new THREE.Group(); barrel.position.set(2.6, ARB.x, ARB.y); mech.add(barrel);
@@ -2279,9 +2279,9 @@ const windKey = (()=>{
   g.position.set(outX, mechObj.position.y + arb.position.y, arb.position.z); orgelRoot.getObjectByName('Box').add(g);   // 香箱の軸の真横
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.15, .15, .9, 10), brass); shaft.rotation.z = Math.PI/2; shaft.position.x = .45; g.add(shaft); shaft.name = 'WindKey_Shaft';
   addOutline(shaft, .02, OUT_MECH);
-  const bow = new THREE.Group(); bow.position.x = .95; g.add(bow);
+  const bow = new THREE.Group(); bow.position.x = .95; g.add(bow); bow.name = 'WindKey_Bow';
   for(const sy of [-1, 1]){
-    const w = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .12, 20), brass); w.name = 'WindKey_Wing';
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .12, 20), brass); w.name = sy < 0 ? 'WindKey_Wing_D' : 'WindKey_Wing_U';
     w.rotation.z = Math.PI/2; w.scale.set(1, 1, .72); w.position.y = sy*.6; bow.add(w); addOutline(w, .02, OUT_MECH);
   }
   const hub = new THREE.Mesh(new THREE.CylinderGeometry(.26, .26, .2, 12), brass); hub.rotation.z = Math.PI/2; bow.add(hub); hub.name = 'WindKey_Hub';
