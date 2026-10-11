@@ -75,7 +75,9 @@
   }
   /* 飾りの外枠（手描き）：左右の唐草（LINE.png、右は左右反転）、上の角に燕（bird.png、左は左右反転）、上下の金の線。
      画像が両方読めたときだけ #player に .ornate を付ける（無いあいだは今の枠） */
-  #player.ornate{ --gold:#b68f50; border:0; border-radius:12px; padding:20px 30px 12px; overflow:visible; }
+  #player.ornate{ --gold:#b68f50; --orn-a:.5; --orn-blur:8px; border:0; border-radius:12px; padding:20px 30px 12px; overflow:visible;
+    background:rgba(30,24,58,var(--orn-a)); -webkit-backdrop-filter:blur(var(--orn-blur)); backdrop-filter:blur(var(--orn-blur)); }   /* 地の濃さとぼかし（確認用に ?panela=・?panelblur=） */
+  #player.ornate #npTitle{ color:var(--gold); }
   #player .orn{ position:absolute; pointer-events:none; display:none; }
   #player.ornate .orn{ display:block; }
   #player .orn-side{ top:-4px; height:calc(100% + 8px); width:auto; }
@@ -1833,6 +1835,8 @@ refreshPlayerIcons();
       add('orn-line orn-top', 'div'); add('orn-line orn-bot', 'div');
       add('orn-side orn-l', 'img', srcs.side); add('orn-side orn-r', 'img', srcs.side);
       add('orn-bird orn-bl', 'img', srcs.bird); add('orn-bird orn-br', 'img', srcs.bird);
+      if(PARAMS.has('panela')) player.style.setProperty('--orn-a', PARAMS.get('panela'));
+      if(PARAMS.has('panelblur')) player.style.setProperty('--orn-blur', PARAMS.get('panelblur') + 'px');
       player.classList.add('ornate');
     };
     img.src = srcs[k];
