@@ -77,7 +77,10 @@
      画像が両方読めたときだけ #player に .ornate を付ける（無いあいだは今の枠） */
   #player.ornate{ --gold:#b68f50; --orn-a:.3; --orn-blur:8px; border:0; border-radius:12px; padding:20px 30px 12px; overflow:visible;
     background:rgba(30,24,58,var(--orn-a)); -webkit-backdrop-filter:blur(var(--orn-blur)); backdrop-filter:blur(var(--orn-blur)); }   /* 地の濃さとぼかし（確認用に ?panela=・?panelblur=） */
-  #player.ornate #npTitle{ color:var(--gold); }
+  #player.ornate #npTitle{ color:var(--gold);   /* 細い白フチ：8方向の影で縁取る（text-stroke は文字の内側も削るため使わない） */
+    --fw:1px; --fd:calc(var(--fw)*.7);   /* フチの太さ（確認用に ?fuchi=） */
+    text-shadow:var(--fw) 0 0 #fff, calc(-1*var(--fw)) 0 0 #fff, 0 var(--fw) 0 #fff, 0 calc(-1*var(--fw)) 0 #fff,
+      var(--fd) var(--fd) 0 #fff, calc(-1*var(--fd)) var(--fd) 0 #fff, var(--fd) calc(-1*var(--fd)) 0 #fff, calc(-1*var(--fd)) calc(-1*var(--fd)) 0 #fff; }
   #player .orn{ position:absolute; pointer-events:none; display:none; }
   #player.ornate .orn{ display:block; }
   #player .orn-side{ top:-4px; height:calc(100% + 8px); width:auto; }
@@ -1836,6 +1839,7 @@ refreshPlayerIcons();
       add('orn-line orn-top', 'div'); add('orn-line orn-bot', 'div');
       add('orn-side orn-l', 'img', srcs.sideL); add('orn-side orn-r', 'img', srcs.sideR);
       add('orn-bird orn-bl', 'img', srcs.birdL); add('orn-bird orn-br', 'img', srcs.birdR);
+      if(PARAMS.has('fuchi')) document.getElementById('npTitle').style.setProperty('--fw', PARAMS.get('fuchi') + 'px');
       if(PARAMS.has('panela')) player.style.setProperty('--orn-a', PARAMS.get('panela'));
       if(PARAMS.has('panelblur')) player.style.setProperty('--orn-blur', PARAMS.get('panelblur') + 'px');
       player.classList.add('ornate');
