@@ -1840,6 +1840,7 @@ refreshPlayerIcons();
       add('orn-line orn-top', 'div'); add('orn-line orn-bot', 'div');
       add('orn-side orn-l', 'img', srcs.sideL); add('orn-side orn-r', 'img', srcs.sideR);
       add('orn-bird orn-bl', 'img', srcs.birdL); add('orn-bird orn-br', 'img', srcs.birdR);
+      if(PARAMS.has('tsize')) document.getElementById('npTitle').style.fontSize = PARAMS.get('tsize') + 'px';   // 曲名の大きさ（確認用）
       if(PARAMS.has('fuchi')) document.getElementById('npTitle').style.setProperty('--fw', PARAMS.get('fuchi') + 'px');
       if(PARAMS.has('panela')) player.style.setProperty('--orn-a', PARAMS.get('panela'));
       if(PARAMS.has('panelblur')) player.style.setProperty('--orn-blur', PARAMS.get('panelblur') + 'px');
