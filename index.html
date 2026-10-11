@@ -78,6 +78,7 @@
      画像が両方読めたときだけ #player に .ornate を付ける（無いあいだは今の枠） */
   #player.ornate{ --gold:#b68f50; --orn-a:.3; --orn-blur:8px; border:0; border-radius:12px; padding:15px 30px 12px; overflow:visible;
     background:rgba(30,24,58,var(--orn-a)); -webkit-backdrop-filter:blur(var(--orn-blur)); backdrop-filter:blur(var(--orn-blur)); }   /* 地の濃さとぼかし（確認用に ?panela=・?panelblur=） */
+  #player.ornate #nowPlaying{ position:relative; top:-5px; }   /* 曲名と副題だけ 5px 上へ（ほかの並びとパネルの高さは変えない） */
   #player.ornate #npTitle{ color:var(--gold);   /* 細い白フチ：8方向の影で縁取る（text-stroke は文字の内側も削るため使わない） */
     --fw:.2px; --fd:calc(var(--fw)*.7);   /* フチの太さ（確認用に ?fuchi=） */
     text-shadow:var(--fw) 0 0 #fff, calc(-1*var(--fw)) 0 0 #fff, 0 var(--fw) 0 #fff, 0 calc(-1*var(--fw)) 0 #fff,
