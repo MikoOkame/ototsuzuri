@@ -74,7 +74,7 @@
     border:1px solid transparent; border-image-source:var(--frame-img);
     border-image-width:var(--frame-corner); border-image-repeat:round;   /* border-image-slice は JS が隅×3 で入れる */
   }
-  /* 飾りの外枠（手描き）：左右の唐草（line_L.png・line_R.png）、上の角に燕（bird_L.png・bird_R.png）、上下の金の線。
+  /* 飾りの外枠（手描き）：左右の唐草（line_L.png。右は 180 度回して使い回す）、上の角に燕（bird_L.png・bird_R.png）、上下の金の線。
      画像が両方読めたときだけ #player に .ornate を付ける（無いあいだは今の枠） */
   #player.ornate{ --gold:#b68f50; --orn-a:.3; --orn-blur:8px; border:0; border-radius:12px; padding:15px 30px 12px; overflow:visible;
     background:rgba(30,24,58,var(--orn-a)); -webkit-backdrop-filter:blur(var(--orn-blur)); backdrop-filter:blur(var(--orn-blur)); }   /* 地の濃さとぼかし（確認用に ?panela=・?panelblur=） */
@@ -87,7 +87,7 @@
   #player.ornate .orn{ display:block; }
   #player .orn-side{ top:-4px; height:calc(100% + 8px); width:auto; }
   #player .orn-l{ left:-13px; }
-  #player .orn-r{ right:-13px; }
+  #player .orn-r{ right:-13px; transform:rotate(180deg); }   /* 右の唐草は左の絵を 180 度回して使い回す */
   #player .orn-bird{ top:-30px; width:56px; height:auto; }
   #player .orn-bl{ left:14px; }
   #player .orn-br{ right:14px; }
@@ -1854,17 +1854,17 @@ function refreshMuteIcon(){   // 消音の絵が無いあいだは、音あり�
 iconRefresh.push(refreshPlayerIcons);
 iconRefresh.push(updateSpringBtn);
 refreshPlayerIcons();
-/* 飾りの外枠：唐草と燕の絵（左右それぞれ）が全部読めたら組み立てる（?icondir= の場所から読む） */
+/* 飾りの外枠：唐草（左右で1枚）と燕（左右それぞれ）の絵が全部読めたら組み立てる（?icondir= の場所から読む） */
 {
   const player = document.getElementById('player');
-  const srcs = { sideL:ICON_DIR + 'line_L.png', sideR:ICON_DIR + 'line_R.png', birdL:ICON_DIR + 'bird_L.png', birdR:ICON_DIR + 'bird_R.png' };
-  let left = 4;
+  const srcs = { side:ICON_DIR + 'line_L.png', birdL:ICON_DIR + 'bird_L.png', birdR:ICON_DIR + 'bird_R.png' };
+  let left = 3;
   const add = (cls, tag, src)=>{ const e = document.createElement(tag); e.className = 'orn ' + cls; if(src){ e.src = src; e.alt = ''; } player.appendChild(e); };
   for(const k in srcs){
     const img = new Image();
     img.onload = ()=>{ if(--left) return;
       add('orn-line orn-top', 'div'); add('orn-line orn-bot', 'div');
-      add('orn-side orn-l', 'img', srcs.sideL); add('orn-side orn-r', 'img', srcs.sideR);
+      add('orn-side orn-l', 'img', srcs.side); add('orn-side orn-r', 'img', srcs.side);
       add('orn-bird orn-bl', 'img', srcs.birdL); add('orn-bird orn-br', 'img', srcs.birdR);
       if(PARAMS.has('tsize')) document.getElementById('npTitle').style.fontSize = PARAMS.get('tsize') + 'px';   // 曲名の大きさ（確認用）
       if(PARAMS.has('fuchi')) document.getElementById('npTitle').style.setProperty('--fw', PARAMS.get('fuchi') + 'px');
