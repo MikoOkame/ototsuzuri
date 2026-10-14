@@ -1218,13 +1218,17 @@ function buildAudioGraph(ctx){
     masterGain = audioCtx.createGain();
     masterGain.gain.value = muted ? 0 : volume;
     masterCompressor = audioCtx.createDynamicsCompressor();
-    masterCompressor.threshold.value = -12;
-    masterCompressor.knee.value = 18;
-    masterCompressor.ratio.value = 6;
-    masterCompressor.attack.value = .003;
+    const softComp = MIX_FX.has('comp');
+    masterCompressor.threshold.value = softComp ? -6 : -12;
+    masterCompressor.knee.value = softComp ? 12 : 18;
+    masterCompressor.ratio.value = softComp ? 3 : 6;
+    masterCompressor.attack.value = softComp ? .01 : .003;
     masterCompressor.release.value = .25;
     masterGain.connect(masterCompressor);
-    masterCompressor.connect(audioCtx.destination);
+    if(softComp){   // 抑えを弱めると、コンプレッサーが自動で足す持ち上げ（メイクアップ）が減って全体が約 1.2dB 小さくなる。その分を戻す
+      const makeup = audioCtx.createGain(); makeup.gain.value = 1.15;
+      masterCompressor.connect(makeup); makeup.connect(audioCtx.destination);
+    } else masterCompressor.connect(audioCtx.destination);
     ensureReverb();
   }
   return audioCtx;
@@ -1243,11 +1247,35 @@ function buildImpulseResponse(ctx, seconds, decay){
    ・パッド：膨らむ（指数で 0.9 秒）のをやめ、直線で 30ms で立ち上げる（指数の立ち上がりは聞こえ始めが遅れ、拍より遅れて聞こえた）。150Hz より下を切る（低音はベースに任せる）。すぐ立ち上がる分、上限の大きさを .14 → .08 に下げる
    ・ベース：伸びを最長 1.1 秒→ 0.5 秒に縮め、次の音と重ならないようにする */
 const MIX = PARAMS.get('mix') === '2' ? 2 : 1;
+/* mix 2 の追加の手当て（?mixfx=rev,comp,arp で一部だけ入れて聞き比べられる。省略で全部）
+   rev ：残響を部屋らしく。消えていくにつれて高い音を削る、頭に 20ms の間、左右で別の響き。響きの総量は今と揃える
+   comp：全体の音量の抑えを弱める（−12dB から 1/6 → −6dB から 1/3、立ち上がりは 3→10ms で頭を潰さない）
+   arp ：分散和音を三角波から、正弦波に2倍音を少し足した柔らかい音へ */
+const MIX_FX = MIX === 2 ? new Set((PARAMS.get('mixfx') || 'rev,comp,arp').split(',')) : new Set();
 let reverbIn = null;   // 残響の入口（mix 2 では低音を切るフィルター、mix 1 では畳み込みそのもの）
+// 部屋らしい残響：雑音を、時間とともに閉じていく低域通過（9kHz → 約 0.7kHz）に通し、頭に 20ms の間を置く。左右は別の雑音。
+// 響きの総量（二乗和）は buildImpulseResponse と揃える（残響の大きさを変えずに質だけ変える）
+function buildRoomImpulse(ctx, seconds, decay){
+  const rate = ctx.sampleRate, pre = Math.floor(rate*.02), length = Math.max(1, Math.floor(rate*seconds));
+  const impulse = ctx.createBuffer(2, length + pre, rate);
+  for(let ch=0; ch<2; ch++){
+    const data = impulse.getChannelData(ch);
+    let lp = 0, eNew = 0, eRef = 0;
+    for(let i=0;i<length;i++){
+      const env = Math.pow(1 - i/length, decay), n = Math.random()*2 - 1;
+      const fc = 600 + 8400*Math.exp(-i/rate*1.6), a = Math.exp(-2*Math.PI*fc/rate);
+      lp = (1 - a)*n + a*lp;
+      const v = lp*env; data[pre + i] = v; eNew += v*v; eRef += (n*env)*(n*env);
+    }
+    const k = Math.sqrt(eRef/eNew);
+    for(let i=pre;i<pre + length;i++) data[i] *= k;
+  }
+  return impulse;
+}
 function ensureReverb(){
   if(reverbConvolver) return;
   reverbConvolver = audioCtx.createConvolver();
-  reverbConvolver.buffer = buildImpulseResponse(audioCtx, 2.8, 2.6);
+  reverbConvolver.buffer = MIX_FX.has('rev') ? buildRoomImpulse(audioCtx, 2.8, 2.6) : buildImpulseResponse(audioCtx, 2.8, 2.6);
   reverbWet = audioCtx.createGain();
   reverbWet.gain.value = .22;
   reverbConvolver.connect(reverbWet);
@@ -1341,7 +1369,7 @@ function playMusicBoxNote(startTime, midi, dur, vel){
 }
 function playTriangleNote(startTime, midi, dur, vel){
   const freq = midiToFreq(midi);
-  const osc = trackNode(audioCtx.createOscillator()); osc.type = 'triangle'; osc.frequency.value = freq;
+  const osc = trackNode(audioCtx.createOscillator()); osc.type = MIX_FX.has('arp') ? 'sine' : 'triangle'; osc.frequency.value = freq;
   const peak = clampNum(vel/127,.05,1)*.22, attack = .008, release = Math.min(dur*1.1+.15, 1);
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
@@ -1349,7 +1377,13 @@ function playTriangleNote(startTime, midi, dur, vel){
   g.gain.exponentialRampToValueAtTime(.0001, startTime+attack+release);
   osc.connect(g); g.connect(masterGain); sendToReverb(g, .5);
   osc.start(startTime); osc.stop(startTime+attack+release+.05);
-  osc.addEventListener('ended', ()=>{ g.disconnect(); });
+  let o2 = null, g2 = null;
+  if(MIX_FX.has('arp')){   // 柔らかい音：正弦波に2倍音を少し（三角波の奇数倍音のブーという濁りを出さない）
+    o2 = trackNode(audioCtx.createOscillator()); o2.type = 'sine'; o2.frequency.value = freq*2;
+    g2 = audioCtx.createGain(); g2.gain.value = .12; o2.connect(g2); g2.connect(g);
+    o2.start(startTime); o2.stop(startTime+attack+release+.05);
+  }
+  osc.addEventListener('ended', ()=>{ g.disconnect(); if(g2) g2.disconnect(); });
 }
 function playPadNote(startTime, midi, dur, vel){
   const freq = midiToFreq(midi);
