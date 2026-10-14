@@ -1190,7 +1190,7 @@ let playGeneration = 0;
 let bgmLoopTimer = null;
 let currentTrackIdx = 0;
 let playMode = CAPTURE ? 'single' : 'all';   // 'single' | 'all' | 'shuffle'。開いたときは全曲リピート（撮影は1曲：音の書き出しが1曲のループ前提のため）
-const FIXED_ORDER_IDS = ['hajimari00','waltz01','umiwatari01','yamagoe02','arashi03','clear'];
+const FIXED_ORDER_IDS = ['hajimari00','waltz01','umiwatari01','yamagoe02','arashi03','clear','track07'];   // 全曲リピートの順
 let isPlaying = false;
 
 /* 再生の状態。見た目（シリンダー・櫛歯・音符）はこれを読む */
@@ -1633,7 +1633,9 @@ function advanceTrack(){
     if(TRACKS.length <= 1) nextIdx = currentTrackIdx;
     else { do { nextIdx = Math.floor(Math.random()*TRACKS.length); } while(nextIdx === currentTrackIdx); }
   } else {
+    // 決まった順の曲のあとに、順に書かれていない曲（後から足した曲）を曲一覧の順で続ける。書き忘れても飛ばさない
     const order = FIXED_ORDER_IDS.map(id => TRACKS.findIndex(t=>t.id===id)).filter(i=>i>=0);
+    TRACKS.forEach((t, i)=>{ if(!order.includes(i)) order.push(i); });
     const pos = order.indexOf(currentTrackIdx);
     nextIdx = order[(pos+1) % order.length];
   }
@@ -3250,7 +3252,7 @@ const spotBtn = document.getElementById('spotBtn');
 spotBtn.addEventListener('click', ()=>{ guide.visible = !guide.visible; spotBtn.setAttribute('aria-pressed', String(guide.visible)); });
 document.getElementById('windBtn').addEventListener('click', windDown);
 if(PARAMS.has('debug')){   // 自動テスト用の覗き窓
-  window.__song = song; window.__isPlaying = ()=>isPlaying; window.__nodes = ()=>activeNodes.length;
+  window.__song = song; window.__advance = ()=>advanceTrack(); window.__isPlaying = ()=>isPlaying; window.__nodes = ()=>activeNodes.length;
   window.__ctxState = ()=>audioCtx ? audioCtx.state : 'none'; window.__teeth = ()=>orgel.teeth.length;
   window.__birds = birds; window.__camera = camera; window.__THREE = THREE;
   window.__spring = { live:()=>windSfxLive, render:async grips=>{   // 巻く音だけをオフラインで書き出す（確認用）
