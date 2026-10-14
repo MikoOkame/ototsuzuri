@@ -1238,6 +1238,12 @@ function buildImpulseResponse(ctx, seconds, decay){
   }
   return impulse;
 }
+/* 低音の整理（?mix=2 で聞き比べ。既定は今までの mix 1）。低い音が「ボワーン」と残るのを抑える：
+   ・残響に送る手前で 300Hz より下を切る（低い音の残響が溜まってこもるため。ミックスの定番の手当て）
+   ・パッド：膨らむ時間を最長 0.9 秒→ 0.15 秒にし、150Hz より下を切る（低音はベースに任せる）。すぐ立ち上がる分、上限の大きさを .14 → .08 に下げる
+   ・ベース：伸びを最長 1.1 秒→ 0.5 秒に縮め、次の音と重ならないようにする */
+const MIX = PARAMS.get('mix') === '2' ? 2 : 1;
+let reverbIn = null;   // 残響の入口（mix 2 では低音を切るフィルター、mix 1 では畳み込みそのもの）
 function ensureReverb(){
   if(reverbConvolver) return;
   reverbConvolver = audioCtx.createConvolver();
@@ -1246,6 +1252,11 @@ function ensureReverb(){
   reverbWet.gain.value = .22;
   reverbConvolver.connect(reverbWet);
   reverbWet.connect(masterGain);
+  reverbIn = reverbConvolver;
+  if(MIX === 2){
+    reverbIn = audioCtx.createBiquadFilter(); reverbIn.type = 'highpass'; reverbIn.frequency.value = 300; reverbIn.Q.value = .7;
+    reverbIn.connect(reverbConvolver);
+  }
 }
 // リバーブ送りの Gain は送り量ごとに1個だけ作って使い回す（共有してよいノード）
 const reverbSends = {};
@@ -1255,7 +1266,7 @@ function sendToReverb(g, sendAmount){
   if(!reverbSends[key]){
     const send = audioCtx.createGain();
     send.gain.value = amt;
-    send.connect(reverbConvolver);
+    send.connect(reverbIn);
     reverbSends[key] = send;
   }
   g.connect(reverbSends[key]);
@@ -1345,20 +1356,24 @@ function playPadNote(startTime, midi, dur, vel){
   const osc = trackNode(audioCtx.createOscillator()); osc.type = 'sine'; osc.frequency.value = freq;
   const osc2 = trackNode(audioCtx.createOscillator()); osc2.type = 'sine'; osc2.frequency.value = freq*1.003;
   const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 1400;
-  const peak = clampNum(vel/127,.05,1)*.14, attack = Math.min(dur*.4, .9), release = Math.min(dur*.5, 1.2);
+  const peak = clampNum(vel/127,.05,1)*(MIX === 2 ? .08 : .14), attack = Math.min(dur*.4, MIX === 2 ? .15 : .9), release = Math.min(dur*.5, 1.2);   // mix 2：すぐ立ち上がる分、上限を下げて平均の大きさを揃える
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime+attack);
   g.gain.setValueAtTime(peak, startTime+Math.max(dur-release, attack));
   g.gain.exponentialRampToValueAtTime(.0001, startTime+dur);
-  osc.connect(filter); osc2.connect(filter); filter.connect(g); g.connect(masterGain); sendToReverb(g, .5);
+  osc.connect(filter); osc2.connect(filter);
+  let hp = null;
+  if(MIX === 2){ hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 150; hp.Q.value = .7; filter.connect(hp); hp.connect(g); }
+  else filter.connect(g);
+  g.connect(masterGain); sendToReverb(g, .5);
   osc.start(startTime); osc.stop(startTime+dur+.05); osc2.start(startTime); osc2.stop(startTime+dur+.05);
-  osc.addEventListener('ended', ()=>{ g.disconnect(); filter.disconnect(); });
+  osc.addEventListener('ended', ()=>{ g.disconnect(); filter.disconnect(); if(hp) hp.disconnect(); });
 }
 function playBassNote(startTime, midi, dur, vel){
   const freq = midiToFreq(midi);
   const osc = trackNode(audioCtx.createOscillator()); osc.type = 'sine'; osc.frequency.value = freq;
-  const peak = clampNum(vel/127,.05,1)*.3, attack = .01, release = Math.min(dur*.9, 1.1);
+  const peak = clampNum(vel/127,.05,1)*.3, attack = .01, release = MIX === 2 ? Math.min(dur*.9, .5) : Math.min(dur*.9, 1.1);
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime+attack);
