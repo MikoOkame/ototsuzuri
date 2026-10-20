@@ -637,8 +637,8 @@ scene.add(moon);
    海の先は水平線にしたいので、正面は低く、左右の端ほど高くする。
    正面のまわり（HILL_GAP 度）は山を水平線の下まで下げて途切れさせ、海が開けて見えるようにする（?gap=度 で確認用）。
 ================================================================ */
-const HILL_GAP = PARAMS.has('gap') ? parseFloat(PARAMS.get('gap')) : 0;   // 正面から左右それぞれ何度まで山を消すか（0 で途切れ無し。ユーザーが幅を選ぶまで既定は 0）
-const HILL_GAP_SOFT = PARAMS.has('gapsoft') ? parseFloat(PARAMS.get('gapsoft')) : 14;                                               // そこから何度かけて元の高さへ戻るか
+const HILL_GAP = PARAMS.has('gap') ? parseFloat(PARAMS.get('gap')) : 5;   // 正面から左右それぞれ何度まで山を消すか（0 で途切れ無し。5 はユーザーが選んだ）
+const HILL_GAP_SOFT = PARAMS.has('gapsoft') ? parseFloat(PARAMS.get('gapsoft')) : 8;                                                // そこから何度かけて元の高さへ戻るか
 const HILLS = [
   { r:900, h:60, seed:1.3, bias:-.05, fade:.8 },
   { r:820, h:46, seed:4.1, bias:-.15, fade:.65 },
