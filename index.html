@@ -635,7 +635,10 @@ scene.add(moon);
 /* ================================================================
    遠山：地平を囲む重なったシルエット。頂点色で下端を霧色へ寄せる。
    海の先は水平線にしたいので、正面は低く、左右の端ほど高くする。
+   正面のまわり（HILL_GAP 度）は山を水平線の下まで下げて途切れさせ、海が開けて見えるようにする（?gap=度 で確認用）。
 ================================================================ */
+const HILL_GAP = PARAMS.has('gap') ? parseFloat(PARAMS.get('gap')) : 0;   // 正面から左右それぞれ何度まで山を消すか（0 で途切れ無し。ユーザーが幅を選ぶまで既定は 0）
+const HILL_GAP_SOFT = 14;                                                 // そこから何度かけて元の高さへ戻るか
 const HILLS = [
   { r:900, h:60, seed:1.3, bias:-.05, fade:.8 },
   { r:820, h:46, seed:4.1, bias:-.15, fade:.65 },
@@ -654,7 +657,9 @@ for(const L of HILLS){
     // 視線（-z）からの方位。正面は低くなだらかに、横へ行くほど高く
     let da = a + Math.PI/2; da = Math.atan2(Math.sin(da), Math.cos(da));
     const side = .6 + .4*sstep(.3, 1.1, Math.abs(da));
-    const h = (L.h * Math.pow(n,1.1) + 2) * side;
+    const gd = Math.abs(da)*180/Math.PI;
+    const open = HILL_GAP > 0 ? sstep(HILL_GAP, HILL_GAP + HILL_GAP_SOFT, gd) : 1;   // 0：途切れ（海が開ける） 1：元の山
+    const h = (L.h * Math.pow(n,1.1) + 2) * side * open - 12*(1 - open);   // 途切れでは水平線（海面）の下まで沈める
     const x = Math.cos(a)*L.r, z = Math.sin(a)*L.r;
     pos.push(x,h,z, x,-60,z);
     col.push(0,0,0, 0,0,0);
