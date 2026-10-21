@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>おもいでのワルツ</title>
+<style>
+  :root{ --bg:#1d1830; --ink:#fff4dc; --dim:rgba(255,244,220,.65); --gold:#b68f50; }
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Maru Gothic ProN","Hiragino Sans",system-ui,sans-serif; }
+  main{ width:min(92vw, 420px); text-align:center; padding:16px; }
+  h1{ margin:0; font-size:22px; color:var(--gold); letter-spacing:.06em; }
+  p.sub{ margin:4px 0 20px; color:var(--dim); font-size:13px; }
+  .row{ display:flex; gap:10px; justify-content:center; align-items:center; flex-wrap:wrap; margin:10px 0; }
+  button{ font:inherit; font-size:15px; color:var(--ink); background:transparent; border:1.5px solid var(--gold); border-radius:999px; padding:9px 20px; cursor:pointer; }
+  button:disabled{ opacity:.4; cursor:default; }
+  label{ font-size:13px; color:var(--dim); }
+  input[type=range]{ accent-color:var(--gold); width:160px; }
+  #time{ font-variant-numeric:tabular-nums; color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>おもいでのワルツ</h1>
+  <p class="sub">〜とべないころの、空のゆめ〜</p>
+  <div class="row"><button id="playBtn">▶ 再生</button><button id="stopBtn" disabled>■ 止める</button><button id="fadeBtn" disabled>ゆっくり消す</button></div>
+  <div class="row"><label><input type="checkbox" id="loopChk"> くり返す</label><label>音量 <input type="range" id="vol" min="0" max="100" value="55"></label></div>
+  <div class="row"><span id="time">0:00 / 1:34</span></div>
+</main>
+<script>
+/* ================================================================
+   おもいでのワルツ（音綴り track07）を、Web Audio で直接合成して鳴らす単体の HTML。
+   作り：音綴り（src/orgel_dev.html）の音源の 2026-10-14 時点の採用版をそのまま使う
+   （オルゴールの音色2、伴奏の整理 mix 2。詳しくは音綴りの specs/bgm_sound_upgrade.md と ref/web-audio-bgm-design.md）。
+   外部のファイル・ライブラリは使わない。この1枚だけで動く。
+
+   ゲームから使うとき（このファイルの <script> をそのまま取り込むか、iframe で読む）：
+     OmoideWaltz.play({ loop:false })   再生（ユーザーの操作のあとに呼ぶこと。ブラウザは操作なしでは音を出させない）
+     OmoideWaltz.stop()                  すぐ止める（40ms で音量を下げてから止めるので、プツッと鳴らない）
+     OmoideWaltz.fadeOut(3)              3 秒かけて消してから止める
+     OmoideWaltz.setVolume(0.55)         音量（0〜1）
+     OmoideWaltz.onEnd = ()=>{ ... }     くり返さない再生で、曲が鳴り終わったとき（残響が消えるまで待ってから）呼ばれる
+     OmoideWaltz.duration                曲の長さ（秒）＝ 94.5
+     OmoideWaltz.position()              再生位置（秒）
+   ================================================================ */
+(()=>{
+const TRACK = {"id":"track07","title":"おもいでのワルツ","subtitle":"〜とべないころの、空のゆめ〜","bpm":80,"loopSec":94.5,"melody":[[0,79,0.3742,57],[0.375,81,0.3742,64],[0.75,83,0.3742,71],[1.125,84,0.3742,75],[1.5,86,0.7492,76],[2.25,78,0.3742,52],[2.625,79,0.3742,58],[3,81,0.3742,64],[3.375,83,0.3742,71],[3.75,84,0.7492,73],[4.5,83,0.75,55],[5.25,84,0.1867,64],[5.4375,83,0.093,57],[5.5313,84,0.093,60],[5.625,83,0.3742,57],[6,81,0.3742,48],[6.375,79,0.3742,42],[6.75,81,0.75,54],[7.5,86,1.125,72],[8.625,87,0.3742,76],[9,88,1.5,81],[10.5,88,0.75,81],[11.25,86,1.125,72],[12.375,83,0.3742,60],[12.75,79,0.75,58],[13.5,81,0.3742,51],[13.875,83,0.3742,59],[14.25,84,0.1867,64],[14.4375,83,0.093,67],[14.5313,84,0.093,61],[14.625,83,0.3742,67],[15,88,0.3742,71],[15.375,91,0.3742,82],[15.75,90,0.75,76],[16.5,86,1.5,72],[18,86,0.3742,83],[18.375,84,0.3742,76],[18.75,83,0.3742,67],[19.125,81,0.3742,61],[19.5,79,0.7492,53],[20.25,81,0.3742,69],[20.625,79,0.3742,63],[21,78,0.3742,56],[21.375,76,0.3742,50],[21.75,74,0.7492,43],[22.5,83,0.75,65],[23.25,84,0.1867,70],[23.4375,83,0.093,68],[23.5313,84,0.093,68],[23.625,83,0.3742,71],[24,81,0.3742,64],[24.375,79,0.3742,60],[24.75,81,0.75,63],[25.5,74,1.125,68],[26.625,75,0.3742,69],[27,76,0.75,76],[27.75,78,0.75,79],[28.5,79,0.75,84],[29.25,74,1.125,66],[30.375,78,0.3742,73],[30.75,79,0.75,76],[31.5,72,0.3742,68],[31.875,79,0.3742,84],[32.25,78,0.1867,73],[32.4375,76,0.093,71],[32.5313,78,0.4688,72],[33,78,0.3742,77],[33.375,78,0.3742,77],[33.75,81,0.75,84],[34.5,79,1.5,72],[36,79,0.7492,56],[36.75,76,0.7492,50],[37.5,70,0.7492,46],[38.25,69,1.1242,43],[38.25,72,0.7492,78],[39,72,0.3742,71],[39.375,69,0.3742,54],[39.75,72,0.75,72],[40.5,79,1.125,78],[41.625,77,1.125,72],[42.75,74,1.125,75],[43.875,72,0.7492,63],[44.625,70,0.3742,57],[45,72,2.25,60],[47.25,74,1.125,62],[48.375,76,0.3742,66],[48.75,77,0.75,67],[49.5,72,1.125,57],[50.625,76,0.3742,63],[51,77,0.75,69],[51.75,74,1.125,61],[52.875,76,0.3742,72],[53.25,77,0.75,73],[54,79,0.75,82],[54.75,72,0.7492,74],[55.5,84,0.7492,84],[56.25,81,1.125,77],[57.375,79,0.3742,72],[57.75,77,0.75,67],[58.5,79,1.125,71],[59.625,77,0.3742,66],[60,76,0.75,60],[60.75,74,0.75,63],[61.5,76,0.75,67],[62.25,77,0.75,71],[63,82,2.25,83],[65.25,81,1.5,79],[66.75,84,0.7492,91],[67.5,82,0.7492,84],[68.25,81,0.7492,78],[69,79,0.7492,72],[69.75,74,1.5,68],[71.25,82,0.7492,82],[72,89,2.2492,90],[74.25,78,0.7492,45],[75,79,0.3742,48],[75.375,81,0.3742,52],[75.75,83,0.3742,56],[76.125,84,0.3742,60],[76.5,86,0.3742,83],[76.875,84,0.3742,76],[77.25,83,0.3742,67],[77.625,81,0.3742,61],[78,79,0.7492,53],[78.75,81,0.3742,69],[79.125,79,0.3742,63],[79.5,78,0.3742,56],[79.875,76,0.3742,50],[80.25,74,0.7492,43],[81,83,0.75,65],[81.75,84,0.1867,70],[81.9375,83,0.093,68],[82.0313,84,0.093,68],[82.125,83,0.3742,71],[82.5,81,0.3742,64],[82.875,79,0.3742,60],[83.25,81,0.75,63],[84,86,1.125,60],[85.125,87,0.3742,58],[85.5,88,0.75,64],[86.25,90,0.75,68],[87,91,0.75,72],[87.75,86,1.125,55],[88.875,90,0.3742,61],[89.25,91,0.75,65],[90,84,0.3742,56],[90.375,91,0.3742,73],[90.75,90,0.1867,62],[90.9375,88,0.093,60],[91.0313,90,0.4688,60],[91.5,90,0.3742,66],[91.875,90,0.3742,66],[92.25,93,0.75,72],[93,91,1.4992,60]],"arp":[[0.75,59,0.3742,51],[0.75,62,0.3742,51],[1.5,59,0.3742,50],[1.5,62,0.3742,50],[3,60,0.3742,53],[3,62,0.3742,53],[3.75,60,0.3742,51],[3.75,62,0.3742,51],[5.25,59,0.3742,49],[5.25,62,0.3742,49],[6,59,0.3742,47],[6,62,0.3742,47],[7.5,60,0.3742,54],[7.5,62,0.3742,54],[8.25,57,0.3742,52],[8.25,63,0.3742,52],[9.375,55,0.3742,42],[9.75,60,0.3742,46],[10.125,64,0.3742,50],[10.5,60,0.3742,48],[10.875,55,0.3742,44],[11.625,55,0.3742,41],[12,59,0.3742,45],[12.375,62,0.3742,49],[12.75,59,0.3742,46],[13.125,55,0.3742,42],[13.875,55,0.3742,44],[14.25,60,0.3742,48],[14.625,64,0.3742,51],[15,60,0.3742,49],[15.375,55,0.3742,45],[16.125,57,0.3742,46],[16.5,60,0.3742,50],[16.875,66,0.3742,54],[17.25,60,0.3742,51],[17.625,57,0.3742,48],[18.75,59,0.3742,48],[18.75,62,0.3742,48],[19.5,59,0.3742,46],[19.5,62,0.3742,46],[21,60,0.3742,49],[21,62,0.3742,49],[21.75,60,0.3742,47],[21.75,62,0.3742,47],[23.25,59,0.3742,46],[23.25,62,0.3742,46],[24,59,0.3742,44],[24,62,0.3742,44],[25.5,60,0.3742,53],[25.5,62,0.3742,53],[26.25,57,0.3742,51],[26.25,63,0.3742,51],[27.375,55,0.3742,49],[27.75,60,0.3742,53],[28.125,64,0.3742,57],[28.5,60,0.3742,54],[28.875,55,0.3742,50],[29.625,55,0.3742,45],[30,59,0.3742,49],[30.375,62,0.3742,53],[30.75,59,0.3742,50],[31.125,55,0.3742,46],[31.875,55,0.3742,44],[32.25,60,0.3742,48],[32.625,64,0.3742,51],[33,60,0.3742,49],[33.375,54,0.3742,45],[34.125,55,0.3742,38],[34.5,59,0.3742,42],[34.875,62,0.3742,46],[35.25,59,0.3742,44],[35.625,55,0.3742,40],[36.75,58,1.4992,38],[36.75,64,1.4992,38],[39,60,1.4992,41],[39,65,1.4992,41],[41.25,65,1.4992,42],[41.25,69,1.4992,42],[43.5,65,1.4992,44],[43.5,70,1.4992,44],[45.75,65,1.4992,40],[45.75,69,1.4992,40],[48,65,0.3742,44],[48,70,0.3742,44],[48.75,65,0.3742,42],[48.75,70,0.3742,42],[50.25,65,0.3742,42],[50.25,69,0.3742,42],[51,65,0.3742,40],[51,69,0.3742,40],[52.5,65,0.3742,46],[52.5,70,0.3742,46],[53.25,65,0.3742,44],[53.25,70,0.3742,44],[54.75,64,0.3742,50],[54.75,70,0.3742,50],[55.5,64,0.3742,48],[55.5,70,0.3742,48],[56.625,57,0.3742,38],[57,60,0.3742,42],[57.375,65,0.3742,46],[57.75,60,0.3742,44],[58.125,65,0.3742,40],[58.875,57,0.3742,41],[59.25,61,0.3742,45],[59.625,65,0.3742,49],[60,61,0.3742,46],[60.375,67,0.3742,42],[61.125,62,0.3742,42],[61.5,65,0.3742,46],[61.875,69,0.3742,50],[62.25,65,0.3742,48],[62.625,69,0.3742,44],[63.375,61,0.3742,45],[63.75,65,0.3742,49],[64.125,70,0.3742,53],[64.5,65,0.3742,50],[64.875,68,0.3742,46],[66,60,0.7492,53],[66,65,0.7492,53],[66,69,0.7492,53],[66.75,58,0.7492,50],[66.75,60,0.7492,50],[66.75,64,0.7492,50],[68.25,60,0.7492,50],[68.25,64,0.7492,50],[68.25,67,0.7492,50],[69,58,0.7492,48],[69,62,0.7492,48],[69,67,0.7492,48],[70.5,62,0.7492,48],[70.5,65,0.7492,48],[70.5,70,0.7492,48],[71.25,61,0.7492,45],[71.25,65,0.7492,45],[71.25,70,0.7492,45],[72.75,57,0.7492,42],[72.75,60,0.7492,42],[72.75,65,0.7492,42],[73.5,57,0.7492,40],[73.5,60,0.7492,40],[73.5,65,0.7492,40],[75,60,0.3742,44],[75,62,0.3742,44],[75.75,60,0.3742,42],[75.75,62,0.3742,42],[77.25,59,0.3742,48],[77.25,62,0.3742,48],[78,59,0.3742,46],[78,62,0.3742,46],[79.5,60,0.3742,49],[79.5,62,0.3742,49],[80.25,60,0.3742,47],[80.25,62,0.3742,47],[81.75,59,0.3742,46],[81.75,62,0.3742,46],[82.5,59,0.3742,44],[82.5,62,0.3742,44],[84,60,0.3742,53],[84,62,0.3742,53],[84.75,57,0.3742,51],[84.75,63,0.3742,51],[85.875,55,0.3742,49],[86.25,60,0.3742,53],[86.625,64,0.3742,57],[87,60,0.3742,54],[87.375,55,0.3742,50],[88.125,55,0.3742,45],[88.5,59,0.3742,49],[88.875,62,0.3742,53],[89.25,59,0.3742,50],[89.625,55,0.3742,46],[90.375,55,0.3742,44],[90.75,60,0.3742,48],[91.125,64,0.3742,51],[91.5,60,0.3742,49],[91.875,54,0.3742,45],[92.625,55,0.3742,38],[93,59,0.3742,42],[93.375,62,0.3742,46],[93.75,59,0.3742,44],[94.125,55,0.3742,40]],"bass":[[0,43,2.2492,47],[2.25,50,2.2492,49],[4.5,43,2.2492,46],[6.75,50,2.25,49],[9,48,2.2492,45],[11.25,47,2.2492,47],[13.5,45,2.2492,49],[15.75,50,2.25,44],[18,47,2.2492,43],[20.25,45,2.2492,47],[22.5,43,2.2492,51],[24.75,50,2.25,48],[27,48,2.2492,44],[29.25,47,2.2492,42],[31.5,45,1.4992,39],[33,50,0.7492,39],[33.75,43,2.2492,34],[36,48,2.2492,42],[38.25,41,2.2492,45],[40.5,45,2.2492,41],[42.75,46,2.2492,39],[45,45,2.2492,38],[47.25,46,2.2492,44],[49.5,45,2.2492,41],[51.75,46,2.2492,42],[54,48,2.2492,46],[56.25,41,2.2492,43],[58.5,45,2.2492,42],[60.75,50,2.2492,44],[63,49,2.2492,47],[65.25,48,2.2492,49],[67.5,49,0.7492,47],[68.25,48,0.7492,45],[69,46,0.7492,43],[69.75,46,2.2492,44],[72,41,2.2492,40],[72,41,2.2492,41],[74.25,42,2.2492,42],[76.5,43,2.2492,43],[78.75,45,2.2492,47],[81,43,2.2492,51],[83.25,50,2.25,48],[85.5,48,2.2492,44],[87.75,47,2.2492,42],[90,45,1.4992,39],[91.5,50,0.7492,39],[92.25,43,2.2492,34]],"strings":[[56.25,57,2.2492,25],[58.5,55,2.2492,26],[60.75,53,4.4992,28],[65.25,52,2.2492,30],[67.5,53,0.7492,30],[68.25,52,0.7492,29],[69,50,0.7492,28],[69.75,50,1.4992,26],[71.25,49,0.7492,26],[72,48,2.2492,23],[76.5,71,2.2492,24],[78.75,72,2.2492,26],[81,71,2.2492,25],[83.25,72,1.4992,28],[84.75,69,0.7492,26],[85.5,64,1.4992,30],[87,63,0.7492,29],[87.75,62,2.2492,27],[90,64,1.4992,26],[91.5,66,0.7492,26],[92.25,67,2.2492,24]]};
+
+let audioCtx = null, masterGain = null, masterCompressor = null, reverbConvolver = null, reverbWet = null;
+let activeNodes = [], volume = .55;
+function midiToFreq(m){ return 440*Math.pow(2, (m-69)/12); }
+function clampNum(v, min, max){ return Math.max(min, Math.min(max, v)); }
+function trackNode(node){
+  activeNodes.push(node);
+  node.addEventListener('ended', ()=>{ const i = activeNodes.indexOf(node); if(i !== -1) activeNodes.splice(i,1); });
+  return node;
+}
+function ensureAudioCtx(){
+  if(audioCtx) return audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext; if(!Ctx) return null;
+  audioCtx = new Ctx();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = volume;
+  masterCompressor = audioCtx.createDynamicsCompressor();
+  masterCompressor.threshold.value = -6;   // 元 -12
+  masterCompressor.knee.value = 12;        // 元 18
+  masterCompressor.ratio.value = 3;        // 元 6
+  masterCompressor.attack.value = .01;     // 元 .003（頭を潰さない）
+  masterCompressor.release.value = .25;
+  masterGain.connect(masterCompressor);
+  // 抑えを弱めると自動の持ち上げが減って約 1.2dB 小さくなる。その分を戻す
+  const makeup = audioCtx.createGain(); makeup.gain.value = 1.15;
+  masterCompressor.connect(makeup); makeup.connect(audioCtx.destination);
+  ensureReverb();
+  return audioCtx;
+}
+
+/* ---- 残響 ---- */
+let reverbIn = null;   // 残響の入口（低い音を切るフィルター）
+
+// 部屋らしい残響：雑音を、時間とともに閉じていく低域通過（9kHz → 約 0.7kHz）に通し、頭に 20ms の間を置く。左右は別の雑音。
+// 響きの総量（二乗和）は元の buildImpulseResponse と揃える（残響の大きさを変えずに質だけ変える）
+function buildRoomImpulse(ctx, seconds, decay){
+  const rate = ctx.sampleRate, pre = Math.floor(rate*.02), length = Math.max(1, Math.floor(rate*seconds));
+  const impulse = ctx.createBuffer(2, length + pre, rate);
+  for(let ch=0; ch<2; ch++){
+    const data = impulse.getChannelData(ch);
+    let lp = 0, eNew = 0, eRef = 0;
+    for(let i=0;i<length;i++){
+      const env = Math.pow(1 - i/length, decay), n = Math.random()*2 - 1;
+      const fc = 600 + 8400*Math.exp(-i/rate*1.6), a = Math.exp(-2*Math.PI*fc/rate);
+      lp = (1 - a)*n + a*lp;
+      const v = lp*env; data[pre + i] = v; eNew += v*v; eRef += (n*env)*(n*env);
+    }
+    const k = Math.sqrt(eRef/eNew);
+    for(let i=pre;i<pre + length;i++) data[i] *= k;
+  }
+  return impulse;
+}
+function ensureReverb(){
+  if(reverbConvolver) return;
+  reverbConvolver = audioCtx.createConvolver();
+  reverbConvolver.buffer = buildRoomImpulse(audioCtx, 2.8, 2.6);   // 長さと減り方は v10 と同じ
+  reverbWet = audioCtx.createGain();
+  reverbWet.gain.value = .22;
+  reverbConvolver.connect(reverbWet);
+  reverbWet.connect(masterGain);
+  // 残響に送る手前で 300Hz より下を切る（低い音の残響が溜まってこもるため）
+  reverbIn = audioCtx.createBiquadFilter(); reverbIn.type = 'highpass'; reverbIn.frequency.value = 300; reverbIn.Q.value = .7;
+  reverbIn.connect(reverbConvolver);
+}
+const reverbSends = {};
+function sendToReverb(g, sendAmount){
+  if(!reverbConvolver) return;
+  const amt = sendAmount === undefined ? 1 : sendAmount, key = String(amt);
+  if(!reverbSends[key]){
+    const send = audioCtx.createGain();
+    send.gain.value = amt;
+    send.connect(reverbIn);            // 元は reverbConvolver に直接
+    reverbSends[key] = send;
+  }
+  g.connect(reverbSends[key]);
+}
+
+/* ---- 音色 ---- */
+// 雑音のバッファ（1つ作って使い回す。オフラインの書き出しなどで sampleRate が変わったら作り直す）
+let noiseBufCache = null;
+function noiseBuf(ctx){
+  if(noiseBufCache && noiseBufCache.sampleRate === ctx.sampleRate) return noiseBufCache;
+  const n = Math.round(ctx.sampleRate*.06), b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = Math.random()*2 - 1;
+  return noiseBufCache = b;
+}
+// 高い音の抑え：ファ6（1400Hz）より上は高さに反比例して弱める（上の音は2乗で）
+const MB_HI_HZ = 1400;
+function playMusicBoxNote(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi);
+  const hi = freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;
+  const peak = clampNum(vel/127,.05,1)*.5*hi, attack = .006, release = Math.min(dur*2.4+.3, 2);
+  const stopAt = startTime + attack + release + .05;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + release);
+  g.connect(masterGain); sendToReverb(g, .5);
+  const parts = [g];
+  const osc0 = trackNode(ctx.createOscillator()); osc0.type = 'sine'; osc0.frequency.value = freq; osc0.connect(g);
+  osc0.start(startTime); osc0.stop(stopAt);
+  // 上の音：[倍率, 基音に対する強さ, 消えるまでの秒]。それぞれ自分の包絡を持ち、基音の包絡（g）は通さず直接出す
+  const overs = [[2.0, .063*hi, release*.6], [3.0, .158*hi*hi, release*.45], [6.27, .3*hi*hi, .07]];
+  for(const [ratio, amp, life] of overs){
+    const f = freq*ratio; if(f > 15000 || amp < .002) continue;
+    const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
+    const og = ctx.createGain(), a = peak*amp;
+    og.gain.setValueAtTime(.0001, startTime);
+    og.gain.exponentialRampToValueAtTime(a, startTime + attack*.5);
+    og.gain.exponentialRampToValueAtTime(.0001, startTime + attack*.5 + life);
+    o.connect(og); og.connect(masterGain); sendToReverb(og, .5); parts.push(og);
+    o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + life + .05));
+  }
+  // ピンが歯を弾く雑音：5ms、高めの帯域
+  const n = ctx.createBufferSource(); n.buffer = noiseBuf(ctx);
+  const ng = ctx.createGain(), bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+  bp.frequency.value = Math.min(9000, 3500 + freq*1.5); bp.Q.value = 1.2;
+  ng.gain.setValueAtTime(.0001, startTime);
+  ng.gain.exponentialRampToValueAtTime(peak*.5, startTime + .0008);
+  ng.gain.exponentialRampToValueAtTime(.0001, startTime + .006);
+  n.connect(bp); bp.connect(ng); ng.connect(masterGain); parts.push(bp, ng);
+  n.start(startTime, Math.random()*.03, .012); trackNode(n);
+  osc0.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
+function playTriangleNote(startTime, midi, dur, vel){
+  const freq = midiToFreq(midi);
+  const osc = trackNode(audioCtx.createOscillator()); osc.type = 'sine'; osc.frequency.value = freq;   // 元 'triangle'
+  const peak = clampNum(vel/127,.05,1)*.22, attack = .008, release = Math.min(dur*1.1+.15, 1);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime+attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime+attack+release);
+  osc.connect(g); g.connect(masterGain); sendToReverb(g, .5);
+  osc.start(startTime); osc.stop(startTime+attack+release+.05);
+  // 柔らかい音：正弦波に2倍音を少し（三角波の奇数倍音の濁りを出さない）
+  const o2 = trackNode(audioCtx.createOscillator()); o2.type = 'sine'; o2.frequency.value = freq*2;
+  const g2 = audioCtx.createGain(); g2.gain.value = .12; o2.connect(g2); g2.connect(g);
+  o2.start(startTime); o2.stop(startTime+attack+release+.05);
+  osc.addEventListener('ended', ()=>{ g.disconnect(); g2.disconnect(); });
+}
+function playBassNote(startTime, midi, dur, vel){
+  const freq = midiToFreq(midi);
+  const osc = trackNode(audioCtx.createOscillator()); osc.type = 'sine'; osc.frequency.value = freq;
+  const peak = clampNum(vel/127,.05,1)*.3, attack = .01, release = Math.min(dur*.9, .5);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime+attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime+attack+release);
+  osc.connect(g); g.connect(masterGain); sendToReverb(g, .5);
+  osc.start(startTime); osc.stop(startTime+attack+release+.05);
+  osc.addEventListener('ended', ()=>{ g.disconnect(); });
+}
+function playStringsNote(startTime, midi, dur, vel){
+  const freq = midiToFreq(midi);
+  const gSum = audioCtx.createGain(), oscs = [];
+  for(const cents of [-7, 0, 7]){
+    const osc = trackNode(audioCtx.createOscillator()); osc.type = 'triangle'; osc.frequency.value = freq; osc.detune.value = cents;
+    osc.connect(gSum); oscs.push(osc);
+  }
+  const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 2400;
+  const peak = clampNum(vel/127,.05,1)*.16, attack = Math.min(dur*.5, .7), release = Math.min(dur*.6+.3, 1.8);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.linearRampToValueAtTime(peak, startTime+attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime+attack+release);
+  gSum.connect(filter); filter.connect(g);
+  const stopAt = startTime+attack+release+.05;
+  for(const osc of oscs){ osc.start(startTime); osc.stop(stopAt); }
+  g.connect(masterGain); sendToReverb(g, .6);
+  oscs[0].addEventListener('ended', ()=>{ g.disconnect(); gSum.disconnect(); filter.disconnect(); });
+}
+
+const INSTRUMENTS = { melody:playMusicBoxNote, arp:playTriangleNote, bass:playBassNote, strings:playStringsNote };
+const PARTS = ['melody','arp','bass','strings'];
+
+/* ---- 先読みの予約（25ms ごとに起き、0.2 秒先までの音だけを予約する） ---- */
+const LOOKAHEAD_MS = 25, AHEAD_SEC = .2, TAIL_SEC = 3.2;   // TAIL：鳴り終わってから残響が消えるまで待つ秒
+const EVENTS = [];
+for(const part of PARTS) for(const [t, midi, dur, vel] of (TRACK[part] || [])) EVENTS.push([t, part, midi, dur, vel]);
+EVENTS.sort((a, b)=>a[0] - b[0]);
+let gen = 0, timer = null, startAt = 0, playing = false, loop = false;
+function schedule(myGen){
+  if(myGen !== gen) return;
+  const now = audioCtx.currentTime, L = TRACK.loopSec;
+  let pos = now - startAt;
+  if(!loop && pos >= L + TAIL_SEC){ finish(); return; }
+  const until = pos + AHEAD_SEC;
+  while(true){
+    const loopIdx = Math.floor(sched.next/EVENTS.length);
+    if(!loop && loopIdx >= 1) break;
+    const ev = EVENTS[sched.next % EVENTS.length], at = loopIdx*L + ev[0];
+    if(at > until) break;
+    if(at >= pos - .05) INSTRUMENTS[ev[1]](startAt + Math.max(at, pos), ev[2], ev[3], ev[4]);
+    sched.next++;
+  }
+  timer = setTimeout(()=>schedule(myGen), LOOKAHEAD_MS);
+}
+const sched = { next:0 };
+function play(opts){
+  const ctx = ensureAudioCtx(); if(!ctx) return;
+  if(ctx.state === 'suspended') ctx.resume();
+  stopNow();
+  loop = !!(opts && opts.loop);
+  gen++; sched.next = 0; playing = true;
+  startAt = ctx.currentTime + .12;
+  masterGain.gain.cancelScheduledValues(ctx.currentTime);
+  masterGain.gain.setValueAtTime(.0001, ctx.currentTime);
+  masterGain.gain.linearRampToValueAtTime(volume, startAt + .05);
+  schedule(gen);
+  ui();
+}
+function stopNow(){
+  gen++; if(timer){ clearTimeout(timer); timer = null; }
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+  masterGain.gain.linearRampToValueAtTime(.0001, now + .04);   // 瞬断するとクリックノイズになる
+  for(const n of activeNodes){ try{ n.stop(now + .045); }catch(e){} }
+  activeNodes = [];
+  playing = false;
+}
+function stop(){ stopNow(); ui(); }
+function fadeOut(sec){
+  if(!playing || !audioCtx) return;
+  const now = audioCtx.currentTime, s = Math.max(.1, sec || 3);
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+  masterGain.gain.linearRampToValueAtTime(.0001, now + s);
+  const myGen = gen; setTimeout(()=>{ if(myGen === gen){ stopNow(); ui(); } }, s*1000 + 60);
+}
+function finish(){ stopNow(); ui(); if(typeof API.onEnd === 'function') API.onEnd(); }
+function setVolume(v){ volume = clampNum(v, 0, 1); if(masterGain && playing){ masterGain.gain.cancelScheduledValues(audioCtx.currentTime); masterGain.gain.setValueAtTime(volume, audioCtx.currentTime); } }
+function position(){ return playing && audioCtx ? Math.max(0, audioCtx.currentTime - startAt) % (loop ? TRACK.loopSec : Infinity) : 0; }
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && audioCtx && audioCtx.state === 'suspended' && playing) audioCtx.resume(); });
+
+const API = { play, stop, fadeOut, setVolume, position, onEnd:null, duration:TRACK.loopSec, get playing(){ return playing; } };
+window.OmoideWaltz = API;
+
+/* ---- このページの確認用の操作盤（ゲームに取り込むときは不要） ---- */
+const $ = id=>document.getElementById(id);
+const fmt = s=>Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2, '0');
+function ui(){ if(!$('playBtn')) return; $('stopBtn').disabled = $('fadeBtn').disabled = !playing; $('playBtn').textContent = playing ? '↺ 頭から' : '▶ 再生'; }
+if($('playBtn')){
+  $('playBtn').onclick = ()=>play({ loop:$('loopChk').checked });
+  $('stopBtn').onclick = stop;
+  $('fadeBtn').onclick = ()=>fadeOut(3);
+  $('vol').oninput = e=>setVolume(e.target.value/100);
+  setInterval(()=>{ $('time').textContent = fmt(Math.min(position(), TRACK.loopSec)) + ' / ' + fmt(TRACK.loopSec); }, 250);
+}
+})();
+</script>
+</body>
+</html>
