@@ -148,6 +148,13 @@
   /* フレームレート表示（?fps のときだけ。制作用。公開時はこの1行と、末尾の「フレームレート表示」節を外す） */
   #fps{ position:fixed; left:8px; top:calc(52px + env(safe-area-inset-top,0px)); z-index:30; font:11px/1.3 ui-monospace,Menlo,monospace; color:#fff; background:rgba(10,8,24,.72); border-radius:6px; padding:4px 7px; pointer-events:none; white-space:pre; }
   /* 撮影中は UI を出さない（紙目と周辺減光は絵の一部なので残す） */
+  body.modelView #tag, body.modelView #hint, body.modelView #player, body.modelView #listBtn, body.modelView .modalOverlay{ display:none !important; }
+  #mvPanel{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom,0px)); width:min(92vw, 420px);
+    display:flex; gap:8px; align-items:center; padding:8px 12px; border-radius:12px; background:rgba(30,24,58,.6); color:var(--ink); font-size:12px;
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); z-index:5; }
+  #mvPanel[hidden]{ display:none; }
+  #mvPanel input{ flex:1; min-width:0; accent-color:#b68f50; }
+  #mvPanel button{ font:inherit; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:999px; padding:4px 10px; cursor:pointer; }
   body.capturing #tag, body.capturing #hint, body.capturing #player, body.capturing #listBtn, body.capturing #dbg, body.capturing #fps, body.capturing .modalOverlay{ display:none !important; }
 </style>
 </head>
@@ -156,6 +163,7 @@
 <div id="paper"></div>
 <div id="vignette"></div>
 
+<div id="mvPanel" hidden><span id="mvTime">昼</span><input type="range" id="mvSlider" min="0" max="1000" aria-label="時刻"><button id="mvFlow" aria-pressed="false">時を流す</button></div>
 <header id="tag">
   <h1>音綴り<span>- OtoTsuzuri -</span></h1>
 </header>
@@ -223,6 +231,9 @@ const MOTION = reduceMotion ? 0.25 : 1;
    このファイルから作り、DEV を false・素材の場所を書き換える。公開版では URL 引数を読まないので、
    デバッグ表示・?fps・?export・確認用の引数・テスト用の覗き窓はすべて動かない */
 const DEV = true;
+/* 風景とオルゴールのモデルだけを見る書き出し（tools/build_model_view.mjs が true にして exports/madobe_model.html を作る）。
+   鳥・音・再生パネル・手描き UI の読み込みを止め、時刻の操作盤だけを出す */
+const MODEL_VIEW = false;
 const ROOT = '../';                                   // リポジトリ直下への相対パス（公開版では ''）
 const PARAMS = new URLSearchParams(DEV ? location.search : '');
 /* 撮影モード（?capture、制作版のみ）：時間をコマ単位で進めて書き出す。乱数も種で固定して、毎回同じ絵にする */
@@ -1864,7 +1875,7 @@ function setIcon(btn, key, text){
     btn.classList.remove('hasIcon'); btn.style.backgroundImage = ''; btn.style.width = ''; btn.style.height = '';
   }
 }
-for(const key in ICON_FILES){
+for(const key in (MODEL_VIEW ? {} : ICON_FILES)){
   const url = ICON_DIR + ICON_FILES[key][0], img = new Image();
   img.onload = ()=>{ ICONS[key] = url; for(const f of iconRefresh) f(); };
   img.src = url;
@@ -1924,7 +1935,7 @@ let LIST_NOTE_URL = null;
     g.putImageData(d, 0, 0);
     LIST_NOTE_URL = cv.toDataURL(); refreshPlayerIcons();
   };
-  img.src = ROOT + 'assets/notes/Note_01.png';
+  if(!MODEL_VIEW) img.src = ROOT + 'assets/notes/Note_01.png';
 }
 function refreshPlayerIcons(){
   updatePlayBtn(); updateModeBtn();
@@ -1961,7 +1972,7 @@ refreshPlayerIcons();
       if(PARAMS.has('panelblur')) player.style.setProperty('--orn-blur', PARAMS.get('panelblur') + 'px');
       player.classList.add('ornate');
     };
-    img.src = srcs[k];
+    if(!MODEL_VIEW) img.src = srcs[k];
   }
 }
 /* 外枠の画像：あれば当てる。無ければ（読み込み失敗なら）今の枠のまま */
@@ -1976,7 +1987,7 @@ const FRAME_SCALE = 3;                                                      // �
     player.style.borderImageSlice = String(Math.round(corner*FRAME_SCALE));
     player.classList.add('has-frame');
   };
-  img.src = FRAME_SRC;
+  if(!MODEL_VIEW) img.src = FRAME_SRC;
 }
 
 /* ================================================================
@@ -2515,6 +2526,7 @@ scene.add(lanternGlow);
    乗算でなく明度で塗り分け、紙の白→淡いパステル、灰色の陰影→同じ色相の深い色。
 ================================================================ */
 const noteTex = ['Note_01','Note_02','Note_03'].map(n=>{
+  if(MODEL_VIEW) return null;
   const t = new THREE.TextureLoader().load(ROOT + 'assets/notes/' + n + '.png'); t.colorSpace = THREE.SRGBColorSpace; return t;
 });
 const NOTE_COL = [0xe58f7a,0xe9a46a,0xe8c15e,0xa9c46c,0x72b89a,0x6fb0c4,0x7d9ad6,0x9f8ad6,0xc486c8,0xde88a8,0xd99a8a,0xb8a27a];
@@ -3199,7 +3211,7 @@ async function loadBirds(){
   for(const b of birds) if(startPresent && b.mode === 'away' && wantPresent(b, dayT) && !b.needDraw){ b.model.visible = true; enterPerch(b); if(!isDay()) { b.seated = true; setAnim(b, 'sit', true, 0, true); } }
   if(PARAMS.has('lookbird')){ const bd = birds[+PARAMS.get('lookbird')]; ORBIT.pan.copy(bd.home.pos).sub(ORBIT_CENTER); ORBIT.pan.y += .12; ORBIT.pan.divideScalar(Math.min(1, ORBIT.dist/3.2)); ORBIT.PAN_MAX = 99; ORBIT.cPan.copy(ORBIT.pan); }   // 確認用：鳥を中心にする
 }
-loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
+if(!MODEL_VIEW) loadBirds().catch(e=>{ window.__err = (window.__err||'') + 'birds: ' + e.message + '\n'; });
 
 
 /* ================================================================
@@ -3275,6 +3287,17 @@ function applyTime(t){
 
 /* ---------- デバッグ表示 ---------- */
 const dbg = document.getElementById('dbg');
+/* 風景とオルゴールのモデルだけを見る書き出し：時刻の操作盤（つまみで時刻、ボタンで時を流す・止める） */
+if(MODEL_VIEW){
+  document.body.classList.add('modelView');
+  const pn = document.getElementById('mvPanel'), sl = document.getElementById('mvSlider'), lb = document.getElementById('mvTime'), fb = document.getElementById('mvFlow');
+  pn.hidden = false; timeSpeed = 0;
+  const name = t=>t < .2 || t >= .86 ? '夜' : t < .3 ? '夜明け' : t < .38 ? '朝' : t < .56 ? '昼' : t < .7 ? '夕方' : '宵';
+  const fmt = t=>{ const m = Math.round(t*1440) % 1440; return name(t) + ' ' + Math.floor(m/60) + ':' + String(m%60).padStart(2, '0'); };
+  sl.addEventListener('input', ()=>{ dayT = sl.value/1000; timeSpeed = 0; fb.setAttribute('aria-pressed', 'false'); fb.textContent = '時を流す'; });
+  fb.addEventListener('click', ()=>{ const on = timeSpeed === 0; timeSpeed = on ? 10 : 0; /* 一日を 72 秒で回す */ fb.setAttribute('aria-pressed', String(on)); fb.textContent = on ? '止める' : '時を流す'; });
+  setInterval(()=>{ if(document.activeElement !== sl) sl.value = Math.round(dayT*1000); lb.textContent = fmt(dayT); }, 250);
+}
 const tSlider = document.getElementById('tSlider'), tLabel = document.getElementById('tLabel');
 if(PARAMS.has('debug')) dbg.classList.add('on');
 function refreshSpeedButtons(){
@@ -3386,7 +3409,7 @@ let lastPinch = 0, lastMid = null;
 canvas.addEventListener('pointerdown', e=>{
   const panBtn = e.pointerType === 'mouse' && (e.button === 2 || e.button === 1);
   logInput(`pointerdown type=${e.pointerType} button=${e.button} buttons=${e.buttons} → ${panBtn ? '移動' : '回す'}`);
-  if(SPRING_ON && pointers.size === 0 && !panBtn && !CAPTURE && pickWindKey(e.clientX, e.clientY)){   // 巻き鍵：押している間巻く
+  if(SPRING_ON && !MODEL_VIEW && pointers.size === 0 && !panBtn && !CAPTURE && pickWindKey(e.clientX, e.clientY)){   // 巻き鍵：押している間巻く
     canvas.setPointerCapture(e.pointerId); springWindStart(e.pointerId); hideHint(); return;
   }
   const hit = pointers.size === 0 && !panBtn ? pickBird(e.clientX, e.clientY) : null;
