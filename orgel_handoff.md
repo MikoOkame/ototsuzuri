@@ -137,6 +137,11 @@
   - パートの割り当て：Melody A（チェレスタ）＋Melody Trio（ピアノ、38〜72秒）→ melody（オルゴール）／Piano Accomp → arp（三角波）／Bass（弦）＋Bass Trio（ピアノ）→ bass／Counter（ヴィオラ・チェロ）→ strings。melody と arp がピンになる（櫛歯 34 本、ピン 336 本）。
   - 2026-10-10：ユーザーが譜面を直した版（中間部の旋律を1オクターブ下げ、主部の旋律も一部下げた。旋律の最高音 101→93）に中身を差し替えて公開。聞き比べ用の `track07b` は消した。変換の割り当てと強さの係数は同じ。
   - 強さ：パートごとに、既存の曲の平均（melody 68・arp 47・bass 44・strings 27）に合うよう係数を掛けた（0.72・0.66・0.49・0.40）。
+- 追加曲（制作版だけ、`devOnly`。2026-10-30）：Nightingale Chess（ユーザーのチェスゲーム）の BGM 2曲を、ゲーム側の HTML に埋め込まれた MIDI からオルゴール編曲した。どちらも 3/4・138BPM・64小節・83.5秒。
+  - `blackking`「Waltz for the Black King」（仮の副題 Lights Up at the Lounge、仮の色 `#d9a35b`）：櫛歯 34 本。
+  - `midnight`「Smoke After Midnight」（仮の副題 When the Eagle Lands、仮の色 `#8f86b8`）：櫛歯 26 本。
+  - 割り当て：melody→melody（オルゴール）／comp（ピアノ）→arp／bass→bass。drums は外す。強さは既存の曲の平均（melody 68・arp 47・bass 44）に合わせた係数。録音の楽器（CC0 の素材集）は使わない。
+  - 未決定：旋律を1オクターブ上げるか（`?ngoct=12` で聞き比べ）、曲名・副題・色。決まったら `devOnly` を外して公開する。
 - スケジューラだけ書き直した：25 ms ごとに `song.pos` を「audio の時計の進み × `song.speed`」で進め、`pos + 0.2秒 × speed` までのノートを予約する。発音時刻 = 今 + (ノート位置 − pos)/speed、長さも /speed。
 - ゼンマイ切れ `windDown()`：`speed = 1 − (t/11秒)^1.7` で落ち、0.015 以下で停止。弾く力（ベロシティ）は `0.35 + 0.65√speed`。音程は触らない。**ゼンマイは自然には切れない（確定）。** デバッグ表示の「ゼンマイ切れ」ボタンでだけ起きる。
 - 再生 UI は v10 の構成（曲一覧・曲名・前後／再生・モード・音量）を画面下に置いた。鍵盤は外した。
