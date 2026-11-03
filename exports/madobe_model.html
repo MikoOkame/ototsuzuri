@@ -1201,6 +1201,15 @@ const TRACKS = [{"id":"hajimari00","title":"はじまりのワルツ","subtitle"
 /* Nightingale Chess（チェスゲーム）の BGM 2曲を MIDI からオルゴール編曲（2026-10-30。同日に公開）。
    旋律→melody（オルゴール）／ピアノの伴奏（comp）→arp／ベース→bass。ドラムは外す。強さは既存の曲の平均に合わせた係数（melody 1.03・1.09、arp 0.84・0.94、bass 0.57・0.58）。
    ?ngoct=12 で旋律だけ1オクターブ上げる（聞き比べ用。オルゴールらしい高さにするかをユーザーが決める） */
+// ?chessacc=gain：2曲の伴奏だけさらに大きく（分散和音の強さ 1.6 倍・ベース 1.5 倍）。?chessacc=oct：伴奏の和音を1オクターブ上げる（電車の騒音より上の帯域へ）。?chessacc=both：1オクターブ上げて、分散和音 1.3 倍・ベース 1.5 倍。聞き比べ用
+if(PARAMS.has('chessacc')){
+  const mode = PARAMS.get('chessacc');
+  for(const t of TRACKS) if(t.id === 'blackking' || t.id === 'midnight'){
+    if(mode === 'gain'){ t.arp = t.arp.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.6))]); t.bass = t.bass.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.5))]); }
+    if(mode === 'oct' || mode === 'both') t.arp = t.arp.map(([a, m, d, v])=>[a, m + 12, d, v]);
+    if(mode === 'both'){ t.arp = t.arp.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.3))]); t.bass = t.bass.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.5))]); }
+  }
+}
 if(PARAMS.has('ngoct')){
   const k = parseInt(PARAMS.get('ngoct')) || 0;
   for(const t of TRACKS) if(t.id === 'blackking' || t.id === 'midnight') t.melody = t.melody.map(([a, m, d, v])=>[a, m + k, d, v]);
