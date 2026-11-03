@@ -1196,6 +1196,8 @@ const TRACKS = [{"id":"hajimari00","title":"はじまりのワルツ","subtitle"
    旋律→melody（オルゴール）／ピアノの伴奏（comp）→arp／ベース→bass。ドラムは外す。強さは既存の曲の平均に合わせた係数（melody 1.03・1.09、arp 0.84・0.94、bass 0.57・0.58）。
    ?ngoct=12 で旋律だけ1オクターブ上げる（聞き比べ用。オルゴールらしい高さにするかをユーザーが決める） */
 // ?chessacc=gain：2曲の伴奏だけさらに大きく（分散和音の強さ 1.6 倍・ベース 1.5 倍）。?chessacc=oct：伴奏の和音を1オクターブ上げる（電車の騒音より上の帯域へ）。?chessacc=both：1オクターブ上げて、分散和音 1.3 倍・ベース 1.5 倍。?chessacc=piano：高さはそのままで、伴奏をピアノ寄りの倍音の多い音色（pianoacc）に。聞き比べ用
+// ?pianoall=1：ほかの曲の分散和音（arp）にも、ピアノ寄りの伴奏（pianoacc）を当てる（聞き比べ用）
+if(PARAMS.get('pianoall') === '1') for(const t of TRACKS) if(!(t.instruments && t.instruments.arp)) t.instruments = Object.assign({}, t.instruments, { arp:'pianoacc' });
 if(PARAMS.has('chessacc')){
   const mode = PARAMS.get('chessacc');
   for(const t of TRACKS) if(t.id === 'blackking' || t.id === 'midnight'){
