@@ -1586,28 +1586,33 @@ function playStringsNote(startTime, midi, dur, vel){
    基音が騒音に消えても倍音で音の高さが聞き取れる。そこで 1〜7 倍の倍音を足し、高い倍音ほど早く消す（ピアノの音の減り方）。
    倍音はわずかに高めにずらす（ピアノの弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
 function playPianoAccNote(startTime, midi, dur, vel){
+  // 包絡：鍵を押している間（譜面の長さ）は、ゆっくり弱まりながら鳴り続ける（ピアノの音の減り方）。離したら 0.25 秒で消える（ダンパー）。
+  // 倍音もゆっくり消す。最初の版は、全体も倍音も鳴った直後から減り始め、倍音が 0.2 秒ほどで消えたので、全部の音がスタッカートに聞こえた
   const ctx = audioCtx, freq = midiToFreq(midi);
-  const peak = clampNum(vel/127,.05,1)*.22*(ACC2 ? 1.6 : 1), attack = .006, release = Math.min(dur*1.1+.25, 1.4);
+  const peak = clampNum(vel/127,.05,1)*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .006;
+  const hold = Math.max(dur, .25), end = startTime + hold, stopAt = end + 1.1;
   const g = ctx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
-  g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + release);
+  g.gain.setTargetAtTime(peak*.4, startTime + attack, 1.0);   // 押している間：時定数 1 秒でゆっくり弱まる
+  g.gain.setTargetAtTime(.0001, end, .25);                    // 離したら：ダンパーで消える（短すぎるとスタッカートに聞こえる）
   g.connect(masterGain); sendToReverb(g, .5);
-  const parts = [g], stopAt = startTime + attack + release + .05;
+  const parts = [g];
   let first = null;
   const AMP = [1, .55, .38, .26, .17, .11, .07], B = .0004;
   for(let n=1; n<=AMP.length; n++){
     const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 12000) break;
     const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
-    const pg = ctx.createGain(), life = release/(1 + .45*(n - 1));   // 高い倍音ほど早く消える
+    const pg = ctx.createGain();
     pg.gain.setValueAtTime(AMP[n-1], startTime);
-    pg.gain.setTargetAtTime(.0001, startTime + attack, life/3);
+    if(n > 1) pg.gain.setTargetAtTime(AMP[n-1]*.3, startTime + attack, 1.2/(1 + .3*(n - 1)));   // 高い倍音ほど少し早く弱まる（でも押している間は残る）
     o.connect(pg); pg.connect(g); parts.push(pg);
-    o.start(startTime); o.stop(n === 1 ? stopAt : Math.min(stopAt, startTime + attack + life*1.6));
+    o.start(startTime); o.stop(stopAt);
     if(!first) first = o;
   }
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
+const PIANO_ACC_GAIN = .3;   // 伴奏全体の大きさを「伴奏強め」の分散和音と揃える係数（書き出して測って決める）
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
   flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
