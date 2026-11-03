@@ -1595,8 +1595,8 @@ function playPianoAccNote(startTime, midi, dur, vel){
   const g = ctx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
-  g.gain.setTargetAtTime(peak*.4, startTime + attack, 1.0);   // 押している間：時定数 1 秒でゆっくり弱まる
-  g.gain.setTargetAtTime(.0001, end, .25);                    // 離したら：ダンパーで消える（短すぎるとスタッカートに聞こえる）
+  g.gain.setTargetAtTime(peak*.3, startTime + attack, .5);    // 押している間：時定数 0.5 秒で弱まる（1 秒では長すぎた）
+  g.gain.setTargetAtTime(.0001, end, .14);                    // 離したら：ダンパーで消える（短すぎるとスタッカート、0.25 では長すぎた）
   g.connect(masterGain); sendToReverb(g, .5);
   const parts = [g];
   let first = null;
@@ -1606,14 +1606,14 @@ function playPianoAccNote(startTime, midi, dur, vel){
     const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
     const pg = ctx.createGain();
     pg.gain.setValueAtTime(AMP[n-1], startTime);
-    if(n > 1) pg.gain.setTargetAtTime(AMP[n-1]*.3, startTime + attack, 1.2/(1 + .3*(n - 1)));   // 高い倍音ほど少し早く弱まる（でも押している間は残る）
+    if(n > 1) pg.gain.setTargetAtTime(AMP[n-1]*.25, startTime + attack, .6/(1 + .3*(n - 1)));   // 高い倍音ほど少し早く弱まる（最初の版と、のばした版の中間）
     o.connect(pg); pg.connect(g); parts.push(pg);
     o.start(startTime); o.stop(stopAt);
     if(!first) first = o;
   }
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
-const PIANO_ACC_GAIN = .3;   // 伴奏全体の大きさを「伴奏強め」の分散和音と揃える係数（書き出して測って決める）
+const PIANO_ACC_GAIN = .38;   // 伴奏全体の大きさを「伴奏強め」の分散和音と揃える係数（書き出して測って決める）
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
   flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
