@@ -1196,11 +1196,12 @@ const TRACKS = [{"id":"hajimari00","title":"はじまりのワルツ","subtitle"
 /* Nightingale Chess（チェスゲーム）の BGM 2曲を MIDI からオルゴール編曲（2026-10-30。同日に公開）。
    旋律→melody（オルゴール）／ピアノの伴奏（comp）→arp／ベース→bass。ドラムは外す。強さは既存の曲の平均に合わせた係数（melody 1.03・1.09、arp 0.84・0.94、bass 0.57・0.58）。
    ?ngoct=12 で旋律だけ1オクターブ上げる（聞き比べ用。オルゴールらしい高さにするかをユーザーが決める） */
-// ?chessacc=gain：2曲の伴奏だけさらに大きく（分散和音の強さ 1.6 倍・ベース 1.5 倍）。?chessacc=oct：伴奏の和音を1オクターブ上げる（電車の騒音より上の帯域へ）。?chessacc=both：1オクターブ上げて、分散和音 1.3 倍・ベース 1.5 倍。聞き比べ用
+// ?chessacc=gain：2曲の伴奏だけさらに大きく（分散和音の強さ 1.6 倍・ベース 1.5 倍）。?chessacc=oct：伴奏の和音を1オクターブ上げる（電車の騒音より上の帯域へ）。?chessacc=both：1オクターブ上げて、分散和音 1.3 倍・ベース 1.5 倍。?chessacc=piano：高さはそのままで、伴奏をピアノ寄りの倍音の多い音色（pianoacc）に。聞き比べ用
 if(PARAMS.has('chessacc')){
   const mode = PARAMS.get('chessacc');
   for(const t of TRACKS) if(t.id === 'blackking' || t.id === 'midnight'){
     if(mode === 'gain'){ t.arp = t.arp.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.6))]); t.bass = t.bass.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.5))]); }
+    if(mode === 'piano') t.instruments = Object.assign({}, t.instruments, { arp:'pianoacc' });
     if(mode === 'oct' || mode === 'both') t.arp = t.arp.map(([a, m, d, v])=>[a, m + 12, d, v]);
     if(mode === 'both'){ t.arp = t.arp.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.3))]); t.bass = t.bass.map(([a, m, d, v])=>[a, m, d, Math.min(127, Math.round(v*1.5))]); }
   }
@@ -1581,8 +1582,35 @@ function playStringsNote(startTime, midi, dur, vel){
   g.connect(masterGain); sendToReverb(g, .6);
   oscs[0].addEventListener('ended', ()=>{ g.disconnect(); gSum.disconnect(); filter.disconnect(); });
 }
+/* ピアノ寄りの伴奏（チェスの2曲用。track.instruments で arp に当てる）。
+   正弦波＋2倍音だけの伴奏は、エネルギーが電車の騒音と同じ低い帯域に集まって消えた。本物のピアノの音は倍音が数kHz まで乗るので、
+   基音が騒音に消えても倍音で音の高さが聞き取れる。そこで 1〜7 倍の倍音を足し、高い倍音ほど早く消す（ピアノの音の減り方）。
+   倍音はわずかに高めにずらす（ピアノの弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
+function playPianoAccNote(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi);
+  const peak = clampNum(vel/127,.05,1)*.22*(ACC2 ? 1.6 : 1), attack = .006, release = Math.min(dur*1.1+.25, 1.4);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + release);
+  g.connect(masterGain); sendToReverb(g, .5);
+  const parts = [g], stopAt = startTime + attack + release + .05;
+  let first = null;
+  const AMP = [1, .55, .38, .26, .17, .11, .07], B = .0004;
+  for(let n=1; n<=AMP.length; n++){
+    const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 12000) break;
+    const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
+    const pg = ctx.createGain(), life = release/(1 + .45*(n - 1));   // 高い倍音ほど早く消える
+    pg.gain.setValueAtTime(AMP[n-1], startTime);
+    pg.gain.setTargetAtTime(.0001, startTime + attack, life/3);
+    o.connect(pg); pg.connect(g); parts.push(pg);
+    o.start(startTime); o.stop(n === 1 ? stopAt : Math.min(stopAt, startTime + attack + life*1.6));
+    if(!first) first = o;
+  }
+  first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
-  flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote };
+  flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
 const PARTS = ['melody','arp','pad','bass','bell','strings'];
 function trackInstruments(track){ return Object.assign({}, DEFAULT_INSTRUMENTS, track.instruments || {}); }
