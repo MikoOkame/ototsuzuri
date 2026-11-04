@@ -1602,36 +1602,53 @@ function playStringsNote(startTime, midi, dur, vel){
    ・下の3本の倍音に、わずかに（1Hz 前後）ずらした音を重ねてうなりを出す（実物は1音に弦が2〜3本あり、わずかにずれている）
    ・倍音はわずかに高めにずらす（弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
 function playPianoAccNote(startTime, midi, dur, vel){
+  // 3版目（2026-11-04）。2版目は低い音が「ファーン」と伸びてパッドのよう、高い音もピアノに聞こえなかった（ユーザーの指摘）。
+  //  ・二段の減衰：叩いた直後の 0.1〜0.2 秒で大きく減り（高い倍音ほど深く）、残りの小さな響きだけが周波数に応じて長く残る
+  //  ・ハンマーの打音：フェルトが弦を叩く短い「コッ」（雑音の粒を音の高さに応じた帯域に通す）。高い音ほど目立つ
+  //  ・弦の硬さによる倍音の伸び B は高い音ほど大きく（C3 で 0.00015、C6 で 0.0012）
+  //  ・うなりは2・3倍音だけに弱く（基音に重ねるとパッドのように聞こえた）
   const ctx = audioCtx, freq = midiToFreq(midi), v = clampNum(vel/127, .05, 1);
-  const peak = v*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .005;
-  const end = startTime + Math.max(dur, .25), stopAt = end + .6;
+  const peak = v*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .003;
+  const end = startTime + Math.max(dur, .25), stopAt = end + .5;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0, startTime);
   g.gain.linearRampToValueAtTime(peak, startTime + attack);
-  g.gain.setTargetAtTime(.0001, end, .12);   // 離したら：ダンパーで消える
+  g.gain.setTargetAtTime(.0001, end, .1);   // 離したら：ダンパーで消える
   g.connect(masterGain); sendToReverb(g, .5);
   const parts = [g];
   let first = null;
-  const B = .0004, tilt = 1.35 - .55*v;     // 倍音の傾き：強く弾くほど緩い（明るい）
+  const B = .00015*Math.pow(2, (midi - 48)/12), tilt = 1.3 - .5*v;
   for(let n=1; n<=7; n++){
     const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 9000) break;
-    const amp = Math.pow(n, -tilt)/(1 + Math.pow(f/2000, 2));   // 2kHz から上はなだらかに弱める
+    const amp = Math.pow(n, -tilt)/(1 + Math.pow(f/2500, 2));
     if(amp < .004) continue;
-    const tau = 2.2*Math.pow(220/Math.max(f, 110), .6);          // 減り方（時定数）：220Hz で 2.2 秒、880Hz で約 1 秒、3.5kHz で約 0.4 秒
-    const voices = n <= 3 ? [[0, .62], [.6 + .45*n, .38]] : [[0, 1]];   // 下の3本はわずかにずらした2本で（うなり）
+    const keep = n === 1 ? .55 : Math.max(.12, .4 - .05*n);       // 一段目のあとに残る割合（高い倍音ほど深く減る）
+    const fast = .12/(1 + .25*(n - 1));                            // 一段目の速さ（秒）
+    const slow = 1.3*Math.pow(220/Math.max(f, 110), .7);           // 二段目：残りの響きの長さ（220Hz で 1.3 秒）
+    const voices = (n === 2 || n === 3) ? [[0, .8], [.8 + .4*n, .2]] : [[0, 1]];
     for(const [df, w] of voices){
       const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f + df;
-      const pg = ctx.createGain();
-      pg.gain.setValueAtTime(amp*w, startTime);
-      pg.gain.setTargetAtTime(.0001, startTime + attack, tau);
+      const pg = ctx.createGain(), A = amp*w;
+      pg.gain.setValueAtTime(A, startTime);
+      pg.gain.setTargetAtTime(A*keep, startTime + attack, fast);
+      pg.gain.setTargetAtTime(.0001, startTime + attack + fast*3, slow);
       o.connect(pg); pg.connect(g); parts.push(pg);
-      o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + tau*5));
+      o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + fast*3 + slow*5));
       if(!first) first = o;
     }
   }
+  // ハンマーの打音：音の高さに応じた帯域（低い音は 600Hz 前後、高い音は 3kHz 前後）、20ms ほど
+  const nz = ctx.createBufferSource(); nz.buffer = windNoise(ctx);
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.min(3200, 300 + freq*2.2); bp.Q.value = .9;
+  const ng = ctx.createGain(), nv = .5*v*(.5 + .5*Math.min(1, freq/880));   // 高い音ほど打音を強めに
+  ng.gain.setValueAtTime(.0001, startTime);
+  ng.gain.exponentialRampToValueAtTime(nv, startTime + .0015);
+  ng.gain.exponentialRampToValueAtTime(.0001, startTime + .025);
+  nz.connect(bp); bp.connect(ng); ng.connect(g); parts.push(bp, ng);
+  nz.start(startTime, Math.random()*.03, .03); trackNode(nz);
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
-const PIANO_ACC_GAIN = .44;   // 伴奏全体の大きさを前の版と揃える係数（書き出して測って決める）
+const PIANO_ACC_GAIN = .48;   // 伴奏全体の大きさを前の版と揃える係数（書き出して測って決める）
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
   flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
