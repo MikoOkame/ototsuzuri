@@ -1591,36 +1591,43 @@ function playStringsNote(startTime, midi, dur, vel){
 }
 /* ピアノ寄りの伴奏（チェスの2曲用。track.instruments で arp に当てる）。
    正弦波＋2倍音だけの伴奏は、エネルギーが電車の騒音と同じ低い帯域に集まって消えた。本物のピアノの音は倍音が数kHz まで乗るので、
-   基音が騒音に消えても倍音で音の高さが聞き取れる。そこで 1〜7 倍の倍音を足し、高い倍音ほど早く消す（ピアノの音の減り方）。
-   倍音はわずかに高めにずらす（ピアノの弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
+   基音が騒音に消えても倍音で音の高さが聞き取れる。そこで倍音を足す。作りは AMY のピアノ（実物の録音を倍音ごとに分析したもの）の知見に合わせる：
+   ・倍音の強さは「何倍目か」ではなく「何Hz か」で決める。2kHz あたりから上をなだらかに弱める（どの高さにも同じ割合で倍音を足すと、高い音が矩形波のようなピコピコになった）
+   ・強く弾いた音ほど高い倍音が強い（AMY の実測では、弱→強で基音は 25dB、20番目の倍音は 45dB 大きくなる）
+   ・どの倍音も鳴った瞬間が最大で、すぐ減り始める。減り方は周波数で決め、高い音・高い倍音ほど早く消える。押している間の平らな部分は作らない。離したらダンパーで消える
+   ・下の3本の倍音に、わずかに（1Hz 前後）ずらした音を重ねてうなりを出す（実物は1音に弦が2〜3本あり、わずかにずれている）
+   ・倍音はわずかに高めにずらす（弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
 function playPianoAccNote(startTime, midi, dur, vel){
-  // 包絡：鍵を押している間（譜面の長さ）は、ゆっくり弱まりながら鳴り続ける（ピアノの音の減り方）。離したら 0.25 秒で消える（ダンパー）。
-  // 倍音もゆっくり消す。最初の版は、全体も倍音も鳴った直後から減り始め、倍音が 0.2 秒ほどで消えたので、全部の音がスタッカートに聞こえた
-  const ctx = audioCtx, freq = midiToFreq(midi);
-  const peak = clampNum(vel/127,.05,1)*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .006;
-  const hold = Math.max(dur, .25), end = startTime + hold, stopAt = end + 1.1;
+  const ctx = audioCtx, freq = midiToFreq(midi), v = clampNum(vel/127, .05, 1);
+  const peak = v*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .005;
+  const end = startTime + Math.max(dur, .25), stopAt = end + .6;
   const g = ctx.createGain();
-  g.gain.setValueAtTime(.0001, startTime);
-  g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
-  g.gain.setTargetAtTime(peak*.3, startTime + attack, .5);    // 押している間：時定数 0.5 秒で弱まる（1 秒では長すぎた）
-  g.gain.setTargetAtTime(.0001, end, .14);                    // 離したら：ダンパーで消える（短すぎるとスタッカート、0.25 では長すぎた）
+  g.gain.setValueAtTime(0, startTime);
+  g.gain.linearRampToValueAtTime(peak, startTime + attack);
+  g.gain.setTargetAtTime(.0001, end, .12);   // 離したら：ダンパーで消える
   g.connect(masterGain); sendToReverb(g, .5);
   const parts = [g];
   let first = null;
-  const AMP = [1, .55, .38, .26, .17, .11, .07], B = .0004;
-  for(let n=1; n<=AMP.length; n++){
-    const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 12000) break;
-    const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
-    const pg = ctx.createGain();
-    pg.gain.setValueAtTime(AMP[n-1], startTime);
-    if(n > 1) pg.gain.setTargetAtTime(AMP[n-1]*.25, startTime + attack, .6/(1 + .3*(n - 1)));   // 高い倍音ほど少し早く弱まる（最初の版と、のばした版の中間）
-    o.connect(pg); pg.connect(g); parts.push(pg);
-    o.start(startTime); o.stop(stopAt);
-    if(!first) first = o;
+  const B = .0004, tilt = 1.35 - .55*v;     // 倍音の傾き：強く弾くほど緩い（明るい）
+  for(let n=1; n<=7; n++){
+    const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 9000) break;
+    const amp = Math.pow(n, -tilt)/(1 + Math.pow(f/2000, 2));   // 2kHz から上はなだらかに弱める
+    if(amp < .004) continue;
+    const tau = 2.2*Math.pow(220/Math.max(f, 110), .6);          // 減り方（時定数）：220Hz で 2.2 秒、880Hz で約 1 秒、3.5kHz で約 0.4 秒
+    const voices = n <= 3 ? [[0, .62], [.6 + .45*n, .38]] : [[0, 1]];   // 下の3本はわずかにずらした2本で（うなり）
+    for(const [df, w] of voices){
+      const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f + df;
+      const pg = ctx.createGain();
+      pg.gain.setValueAtTime(amp*w, startTime);
+      pg.gain.setTargetAtTime(.0001, startTime + attack, tau);
+      o.connect(pg); pg.connect(g); parts.push(pg);
+      o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + tau*5));
+      if(!first) first = o;
+    }
   }
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
-const PIANO_ACC_GAIN = .38;   // 伴奏全体の大きさを「伴奏強め」の分散和音と揃える係数（書き出して測って決める）
+const PIANO_ACC_GAIN = .44;   // 伴奏全体の大きさを前の版と揃える係数（書き出して測って決める）
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
   flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
