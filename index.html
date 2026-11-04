@@ -1431,7 +1431,74 @@ function playTriangleNote(startTime, midi, dur, vel){
   }
   osc.addEventListener('ended', ()=>{ g.disconnect(); if(g2) g2.disconnect(); });
 }
+/* パッドを本物らしく（?padv=strings／choir で聞き比べ中。既定は今の playPadNote2）。
+   ピアノが本物らしくなって、倍音3本だけのパッドが「どの楽器でもない音」として浮いた（ユーザーの指摘）。調べた資料の作り方：
+   ・元の波形は倍音の多いのこぎり波。3声を少しずらして左・中・右に置く（合奏）
+   ・音色の山（フォルマント）は音の高さによらず同じ周波数に置く（弦は胴体の共鳴、声は口の形で決まる）
+   ・ビブラート：毎秒約5回、数セント。鳴り始めは揺らさず、0.4 秒ほどかけて揺れ始める
+   ・立ち上がりは直線（指数だと遅れて聞こえる。§伴奏の整理）
+   strings：弦の合奏。胴体の共鳴（約 280Hz の空気・約 550Hz の板・2〜3kHz の駒）を山にし、高い音ほど明るく
+   choir：合唱の「アー」。母音のフォルマント 700・1220・2600Hz（CCRMA の例）を帯域フィルターで並べる */
+const PADV = DEV ? (PARAMS.get('padv') || '') : '';
+function padVoices(ctx, freq, t0, end, detunes, vib, dest, parts){
+  // のこぎり波の3声＋ビブラート（遅れて揺れ始める）。最初の発振器を返す
+  const lfo = trackNode(ctx.createOscillator()); lfo.frequency.value = vib.rate*(.95 + Math.random()*.1);
+  const lg = ctx.createGain(); lg.gain.setValueAtTime(0, t0); lg.gain.linearRampToValueAtTime(vib.cents, t0 + .5);
+  lfo.connect(lg); parts.push(lg); lfo.start(t0); lfo.stop(end);
+  let first = null;
+  for(const [cents, pan] of detunes){
+    const o = trackNode(ctx.createOscillator()); o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = cents;
+    lg.connect(o.detune);
+    const pn = ctx.createStereoPanner(); pn.pan.value = pan;
+    o.connect(pn); pn.connect(dest); parts.push(pn);
+    o.start(t0); o.stop(end);
+    if(!first) first = o;
+  }
+  return first;
+}
+function padEnvelope(ctx, g, t0, dur, peak, attack, rel){
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(peak, t0 + attack);
+  g.gain.setTargetAtTime(peak*.8, t0 + attack, Math.max(.4, dur*.7));   // 伸ばしている間に少し弱まる
+  g.gain.setTargetAtTime(.0001, t0 + Math.max(dur - rel*.5, attack), rel/3);
+}
+function playPadStrings(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi), parts = [];
+  const peak = clampNum(vel/127,.05,1)*PADS_GAIN.strings, end = startTime + dur + .4;
+  const g = ctx.createGain(); padEnvelope(ctx, g, startTime, dur, peak, .09, .5);
+  // 胴体の共鳴：山を3つ（空気 280Hz・板 550Hz・駒 2.6kHz）。高い音ほど明るく（低域通過を音の高さに合わせて上げる）
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.min(7000, 1200 + freq*5); lp.Q.value = .5;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 150; hp.Q.value = .7;
+  let node = lp; lp.connect(hp); node = hp; parts.push(lp, hp);
+  for(const [f, q, db] of [[280, 1.4, 5], [550, 1.6, 3], [2600, 1.1, 5]]){
+    const pk = ctx.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = f; pk.Q.value = q; pk.gain.value = db;
+    node.connect(pk); node = pk; parts.push(pk);
+  }
+  node.connect(g); g.connect(masterGain); sendToReverb(g, .5); parts.push(g);
+  const first = padVoices(ctx, freq, startTime, end, [[-7, -.6], [0, 0], [7, .6]], { rate:5.2, cents:6 }, lp, parts);
+  first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
+function playPadChoir(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi), parts = [];
+  const peak = clampNum(vel/127,.05,1)*PADS_GAIN.choir, end = startTime + dur + .5;
+  const g = ctx.createGain(); padEnvelope(ctx, g, startTime, dur, peak, .12, .6);
+  const sum = ctx.createGain(); parts.push(sum);
+  // 母音「アー」のフォルマント（帯域フィルターを並べる）。少しだけ元の音も混ぜて芯を残す
+  for(const [f, q, a] of [[700, 6, 1], [1220, 8, .55], [2600, 10, .3]]){
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+    const bg = ctx.createGain(); bg.gain.value = a;
+    sum.connect(bp); bp.connect(bg); bg.connect(g); parts.push(bp, bg);
+  }
+  const dry = ctx.createBiquadFilter(); dry.type = 'lowpass'; dry.frequency.value = 900;
+  const dg = ctx.createGain(); dg.gain.value = .12; sum.connect(dry); dry.connect(dg); dg.connect(g); parts.push(dry, dg);
+  g.connect(masterGain); sendToReverb(g, .6); parts.push(g);
+  const first = padVoices(ctx, freq, startTime, end, [[-9, -.5], [0, 0], [8, .5]], { rate:4.8, cents:10 }, sum, parts);
+  first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
+const PADS_GAIN = { strings:.082, choir:.51 };   // 今のパッドと同じ大きさになる値（書き出して測って決める）
 function playPadNote(startTime, midi, dur, vel){
+  if(PADV === 'strings') return playPadStrings(startTime, midi, dur, vel);
+  if(PADV === 'choir') return playPadChoir(startTime, midi, dur, vel);
   if(MIX_FX.has('pad')) return playPadNote2(startTime, midi, dur, vel);
   const freq = midiToFreq(midi);
   const osc = trackNode(audioCtx.createOscillator()); osc.type = 'sine'; osc.frequency.value = freq;
