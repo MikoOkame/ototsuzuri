@@ -151,6 +151,11 @@
   .trackRow .dot{ width:10px; height:10px; border-radius:50%; flex:none; }
   .tTitle{ font-size:14px; font-weight:700; }
   .tSub{ font-size:11px; color:var(--ink-dim); }
+  /* ♪音一覧（曲一覧の中）：楽器のボタンを並べ、押すとドレミファソラシドを鳴らす */
+  #toneGrid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #toneGrid[hidden]{ display:none; }
+  #toneGrid button{ font:inherit; font-size:13px; color:var(--ink); background:rgba(255,255,255,.06); border:1px solid var(--line); border-radius:10px; padding:12px 6px; cursor:pointer; }
+  #toneGrid button.on{ border-color:var(--accent); background:rgba(255,212,148,.15); }
   .sndRow{ padding:9px 8px; border-top:1px solid var(--line); }
   .sndRow .sndName{ font-size:14px; font-weight:700; }
   .sndRow .sndDesc{ font-size:11px; color:var(--ink-dim); margin:2px 0 6px; }
@@ -208,8 +213,10 @@
 </div>
 <div class="modalOverlay" id="listModal">
   <div class="modal" role="dialog" aria-label="曲一覧">
-    <h2>曲一覧</h2>
+    <h2 id="listTitle">曲一覧</h2>
     <div id="trackList"></div>
+    <div id="toneGrid" hidden></div>
+    <button class="modalCloseBtn" id="toneToggle">♪音一覧</button>
     <button class="modalCloseBtn" id="listCloseBtn">とじる</button>
   </div>
 </div>
@@ -2214,7 +2221,49 @@ prevBtn.addEventListener('click', prevTrack);
 nextBtn.addEventListener('click', nextTrack);
 muteBtn.addEventListener('click', ()=>setMuted(!muted));
 volSlider.addEventListener('input', e=>setVolume(e.target.value/100));
-listBtn.addEventListener('click', ()=>{ renderTrackList(); listModal.classList.add('show'); });
+/* ♪音一覧（曲一覧の中、公開版にも出す）：今の曲で使っている楽器を並べ、押すとその楽器でドレミファソラシド（8音）を鳴らす。
+   鳴らすときは再生中の曲を止める（重なると聞き分けられない）。曲ごとの設定は、その楽器を使う最初の曲のものを使う */
+const TONE_NAMES = { musicbox:'オルゴール', mutedmusicbox:'弱音オルゴール', flue:'笛', feltpiano:'フェルトピアノ', triangle:'分散和音',
+  pianoacc:'ピアノ（伴奏）', softpiano:'柔らかいピアノ', pad:'パッド', padpiano:'ピアノ（和音）', bass:'ベース', basspiano:'ピアノ（低音）',
+  bell:'ベル', strings:'弦' };
+const toneGrid = document.getElementById('toneGrid'), toneToggle = document.getElementById('toneToggle'), listTitle = document.getElementById('listTitle');
+let toneTimer = 0;
+function playToneScale(name, track){
+  const ctx = ensureAudioCtx(); if(!ctx) return;
+  if(ctx.state === 'suspended') ctx.resume();
+  stopAllAudio();
+  const t0 = ctx.currentTime + .12;
+  masterGain.gain.cancelScheduledValues(ctx.currentTime);
+  masterGain.gain.setValueAtTime(muted ? 0 : volume, t0 - .05);
+  const fn = INSTRUMENTS[name]; if(!fn) return;
+  const low = name === 'bass' || name === 'basspiano', chord = name === 'pad' || name === 'padpiano';
+  const base = low ? 36 : chord ? 48 : 60, vel = low ? 44 : chord ? 34 : 64, step = .42;
+  previewTrack = track;
+  try{ [0, 2, 4, 5, 7, 9, 11, 12].forEach((n, k)=>fn(t0 + k*step, base + n, step*.95, vel)); }
+  finally{ previewTrack = null; }
+}
+function renderToneGrid(){
+  toneGrid.innerHTML = '';
+  const use = {};
+  TRACKS.forEach(t=>{ const ins = trackInstruments(t); for(const part of PARTS) if((t[part] || []).length && !use[ins[part]]) use[ins[part]] = t; });
+  for(const name of Object.keys(TONE_NAMES)) if(use[name]){
+    const b = document.createElement('button'); b.textContent = TONE_NAMES[name];
+    b.addEventListener('click', ()=>{
+      toneGrid.querySelectorAll('button.on').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+      clearTimeout(toneTimer); toneTimer = setTimeout(()=>b.classList.remove('on'), 4000);
+      playToneScale(name, use[name]);
+    });
+    toneGrid.appendChild(b);
+  }
+}
+function showToneList(on){
+  toneGrid.hidden = !on; trackList.hidden = on;
+  listTitle.textContent = on ? '音一覧' : '曲一覧';
+  toneToggle.textContent = on ? '曲一覧へもどる' : '♪音一覧';
+  if(on) renderToneGrid();
+}
+toneToggle.addEventListener('click', ()=>showToneList(toneGrid.hidden));
+listBtn.addEventListener('click', ()=>{ renderTrackList(); showToneList(false); listModal.classList.add('show'); });
 listCloseBtn.addEventListener('click', ()=>listModal.classList.remove('show'));
 listModal.addEventListener('click', e=>{ if(e.target === listModal) listModal.classList.remove('show'); });
 
