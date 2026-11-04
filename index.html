@@ -1381,21 +1381,28 @@ const MB_HI_HZ = 1400, MB_HI = PARAMS.get('mbhi') !== '0';
    ・ピンが歯を弾く「ピッ」：雑音の粒（ゼンマイのカチッと同じバッファ）を高めの帯域に通して 5ms ほど
    ・高い音の抑え（MB_HI_HZ）は上の音ほど強く効かせる */
 const MB_TONE = PARAMS.get('tone') === '1' ? 1 : 2;
+/* オルゴールの鋭さを柔らかく（?mbsoft=1／2 で聞き比べ中）。鋭さの元は、弾いた瞬間の 6.27 倍の音・ピンの雑音・3倍の音・立ち上がりの速さ。
+   1：6.27 倍 0.3 → 0.15・ピンの雑音を半分にして帯域を下げる・立ち上がり 6 → 9ms
+   2：さらに 6.27 倍 0.08・ピンの雑音 1/4・3倍の音を 0.7 倍・立ち上がり 12ms・4kHz から上をなだらかに下げる */
+const MBSOFT = DEV ? (parseInt(PARAMS.get('mbsoft')) || 0) : 0;
 function playMusicBoxNote2(startTime, midi, dur, vel){
   const ctx = audioCtx, freq = midiToFreq(midi);
   const hi = MB_HI && freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;
-  const peak = clampNum(vel/127,.05,1)*.5*hi, attack = .006, release = Math.min(dur*2.4+.3, 2);
+  const sf = MBSOFT;
+  const peak = clampNum(vel/127,.05,1)*.5*hi, attack = sf === 2 ? .012 : sf === 1 ? .009 : .006, release = Math.min(dur*2.4+.3, 2);
   const stopAt = startTime + attack + release + .05;
   const g = ctx.createGain();
   g.gain.setValueAtTime(.0001, startTime);
   g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
   g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + release);
-  g.connect(masterGain); sendToReverb(g, .5);
+  let out = masterGain;
   const parts = [g];
+  if(sf === 2){ const ls = ctx.createBiquadFilter(); ls.type = 'highshelf'; ls.frequency.value = 4000; ls.gain.value = -4; ls.connect(masterGain); out = ls; parts.push(ls); }
+  g.connect(out); sendToReverb(g, .5);
   const osc0 = trackNode(ctx.createOscillator()); osc0.type = 'sine'; osc0.frequency.value = freq; osc0.connect(g);
   osc0.start(startTime); osc0.stop(stopAt);
   // 上の音：[倍率, 基音に対する強さ, 消えるまでの秒]。それぞれ自分の包絡を持ち、基音の包絡（g）は通さず直接出す
-  const overs = [[2.0, .063*hi, release*.6], [3.0, .158*hi*hi, release*.45], [6.27, .3*hi*hi, .07]];
+  const overs = [[2.0, .063*hi, release*.6], [3.0, .158*hi*hi*(sf === 2 ? .7 : 1), release*.45], [6.27, (sf === 2 ? .08 : sf === 1 ? .15 : .3)*hi*hi, .07]];
   for(const [ratio, amp, life] of overs){
     const f = freq*ratio; if(f > 15000 || amp < .002) continue;
     const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
@@ -1403,17 +1410,17 @@ function playMusicBoxNote2(startTime, midi, dur, vel){
     og.gain.setValueAtTime(.0001, startTime);
     og.gain.exponentialRampToValueAtTime(a, startTime + attack*.5);
     og.gain.exponentialRampToValueAtTime(.0001, startTime + attack*.5 + life);
-    o.connect(og); og.connect(masterGain); sendToReverb(og, .5); parts.push(og);
+    o.connect(og); og.connect(out); sendToReverb(og, .5); parts.push(og);
     o.start(startTime); o.stop(Math.min(stopAt, startTime + attack + life + .05));
   }
   // ピン：雑音の粒
   const n = ctx.createBufferSource(); n.buffer = windNoise(ctx);
   const ng = ctx.createGain(), bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
-  bp.frequency.value = Math.min(9000, 3500 + freq*1.5); bp.Q.value = 1.2;
+  bp.frequency.value = sf ? Math.min(6000, 2200 + freq*1.2) : Math.min(9000, 3500 + freq*1.5); bp.Q.value = 1.2;
   ng.gain.setValueAtTime(.0001, startTime);
-  ng.gain.exponentialRampToValueAtTime(peak*.5, startTime + .0008);
+  ng.gain.exponentialRampToValueAtTime(peak*(sf === 2 ? .125 : sf === 1 ? .25 : .5), startTime + .0008);
   ng.gain.exponentialRampToValueAtTime(.0001, startTime + .006);
-  n.connect(bp); bp.connect(ng); ng.connect(masterGain); parts.push(bp, ng);
+  n.connect(bp); bp.connect(ng); ng.connect(out); parts.push(bp, ng);
   n.start(startTime, Math.random()*.03, .012); trackNode(n);
   osc0.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
