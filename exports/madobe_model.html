@@ -1713,6 +1713,8 @@ const PFIX = new Set(DEV && PARAMS.has('pfix') ? PARAMS.get('pfix').split(',') :
    直接の音 0.85 → 0.55、残響へ送る量 0.5 → 1.0、3kHz から上を 5dB 下げる、左右の広がり ±0.45 → ±0.2 */
 const PDIST = DEV && PARAMS.get('pdist') === '1';
 // ピアノ（伴奏・和音・低音）全体の大きさ（?pgain=-3 のように dB で。聞き比べ用）。まだ圧が強いと言われた（2026-11-04）
+// ピアノの左右の広がり（?pwidth=0〜1。1＝今、0＝真ん中に一点）。音量は変えずに、音の高さによる左右の振りと響板の左右の違いだけを狭める（聞き比べ用）
+const PWIDTH = DEV && PARAMS.has('pwidth') ? clampNum(parseFloat(PARAMS.get('pwidth')), 0, 1) : 1;
 const PGAIN = DEV && PARAMS.has('pgain') ? Math.pow(10, parseFloat(PARAMS.get('pgain'))/20) : 1;
 const pianoBodies = new WeakMap();
 function pianoBody(ctx){
@@ -1732,6 +1734,10 @@ function pianoBody(ctx){
     }
     for(let i=0; i<len; i++) e += d[i]*d[i];
     const k = 1/Math.sqrt(e); for(let i=0; i<len; i++) d[i] *= k;   // 響きの総量を 1 に（通しても大きさがほぼ変わらない）
+  }
+  if(PWIDTH < 1){   // 左右の響きの違いを狭める（真ん中寄りに）
+    const L = ir.getChannelData(0), Rc = ir.getChannelData(1);
+    for(let i=0; i<len; i++){ const m = (L[i] + Rc[i])/2, sd = (L[i] - Rc[i])/2*PWIDTH; L[i] = m + sd; Rc[i] = m - sd; }
   }
   const conv = ctx.createConvolver(); conv.normalize = false; conv.buffer = ir;
   const out = ctx.createGain(); out.gain.value = .25; conv.connect(out); out.connect(masterGain); sendToReverb(out, .5);
@@ -1760,7 +1766,7 @@ function playPianoAccNote(startTime, midi, dur, vel, opt){
   else g.gain.setTargetAtTime(.0001, end, damp);   // 離したら：ダンパーで消える（伴奏は 0.07。0.1 では静かな部屋で間延びして聞こえた）
   const parts = [g];
   if(PIANO_V4){
-    const W = PDIST ? .2 : .45;
+    const W = (PDIST ? .2 : .45)*PWIDTH;
     const pn = ctx.createStereoPanner(); pn.pan.value = clampNum((midi - 60)/36, -W, W);   // 低い音は左、高い音は右
     const dry = ctx.createGain(); dry.gain.value = (PDIST ? .55 : .85)*PIANO_V4_GAIN*PGAIN;
     const wet = ctx.createGain(); wet.gain.value = PIANO_V4_GAIN*PGAIN;
