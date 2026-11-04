@@ -1246,6 +1246,7 @@ if(PARAMS.has('ngoct')){
    予約は「先読み秒 × speed」の範囲を曲上の位置で切る（ref/web-audio-bgm-design.md §2）。
    ゼンマイが切れると speed が落ち、テンポと弾く力だけが弱まる。音程は変えない。
 ================================================================ */
+let toneBus = null, toneBusOn = false, toneNodes = [];   /* 音一覧の経路（ensureToneBus） */
 let audioCtx = null, masterGain = null, masterCompressor = null, reverbConvolver = null, reverbWet = null;
 let muted = false, volume = .55;
 let activeNodes = [];
@@ -1276,7 +1277,7 @@ function ensureAudioCtx(){
 function buildAudioGraph(ctx){
   {
     audioCtx = ctx;
-    reverbConvolver = null; reverbWet = null; sfxGain = null;
+    reverbConvolver = null; reverbWet = null; sfxGain = null; toneBus = null;
     for(const k in reverbSends) delete reverbSends[k];
     masterGain = audioCtx.createGain();
     masterGain.gain.value = muted ? 0 : volume;
@@ -1362,16 +1363,17 @@ function ensureReverb(){
 const reverbSends = {};
 function sendToReverb(g, sendAmount){
   if(!reverbConvolver) return;
-  const amt = sendAmount === undefined ? 1 : sendAmount, key = String(amt);
-  if(!reverbSends[key]){
+  const amt = sendAmount === undefined ? 1 : sendAmount, key = String(amt), sends = toneBusOn ? toneBus.sends : reverbSends;
+  if(!sends[key]){
     const send = audioCtx.createGain();
     send.gain.value = amt;
     send.connect(reverbIn);
-    reverbSends[key] = send;
+    sends[key] = send;
   }
-  g.connect(reverbSends[key]);
+  g.connect(sends[key]);
 }
 function trackNode(node){
+  if(toneBusOn){ toneNodes.push(node); node.addEventListener('ended', ()=>{ const i = toneNodes.indexOf(node); if(i !== -1) toneNodes.splice(i,1); }); return node; }
   activeNodes.push(node);
   node.addEventListener('ended', ()=>{ const i = activeNodes.indexOf(node); if(i !== -1) activeNodes.splice(i,1); });
   return node;
@@ -1726,7 +1728,8 @@ const PWIDTH = DEV && PARAMS.has('pwidth') ? clampNum(parseFloat(PARAMS.get('pwi
 const PGAIN = DEV && PARAMS.has('pgain') ? Math.pow(10, parseFloat(PARAMS.get('pgain'))/20) : 1;
 const pianoBodies = new WeakMap();
 function pianoBody(ctx){
-  if(pianoBodies.has(ctx)) return pianoBodies.get(ctx);
+  const bodies = toneBusOn ? toneBus.bodies : pianoBodies;   /* 音一覧は自分の経路に自分の響板を持つ */
+  if(bodies.has(ctx)) return bodies.get(ctx);
   const rate = ctx.sampleRate, len = Math.floor(rate*.35), ir = ctx.createBuffer(2, len, rate);
   let seed = 7; const rnd = ()=>{ seed = (seed*16807) % 2147483647; return seed/2147483647; };   // 毎回同じ響板
   const modes = [];
@@ -1750,7 +1753,7 @@ function pianoBody(ctx){
   const conv = ctx.createConvolver(); conv.normalize = false; conv.buffer = ir;
   const out = ctx.createGain(); out.gain.value = .25; conv.connect(out); out.connect(masterGain); sendToReverb(out, .5);
   const node = { conv };
-  pianoBodies.set(ctx, node);
+  bodies.set(ctx, node);
   return node;
 }
 const PIANO_LEN_OLD = DEV && PARAMS.get('pianolen') === 'old', PIANO_LEN_OLD_GAIN = 2.2;   // 大きさは今のピアノと揃える（書き出して測って決める）
@@ -2152,8 +2155,8 @@ function windSfx(grips=1){
   return windPattern(ctx, sfxGain, ctx.currentTime + .03, grips) - ctx.currentTime;
 }
 setInterval(()=>{ springCheck(); updateSpringBtn(); }, 1000);
-function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
-function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; refreshMuteIcon(); }
+function setVolume(v){ volume = v; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(toneBus) toneBus.gain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; }
+function setMuted(m){ muted = m; if(masterGain) masterGain.gain.value = muted ? 0 : volume; if(toneBus) toneBus.gain.gain.value = muted ? 0 : volume; if(sfxGain) sfxGain.gain.value = muted ? 0 : volume*SFX_LEVEL; refreshMuteIcon(); }
 function cyclePlayMode(){
   playMode = playMode === 'single' ? 'all' : (playMode === 'all' ? 'shuffle' : 'single');
   updateModeBtn();
@@ -2216,7 +2219,7 @@ nextBtn.addEventListener('click', nextTrack);
 muteBtn.addEventListener('click', ()=>setMuted(!muted));
 volSlider.addEventListener('input', e=>setVolume(e.target.value/100));
 /* ♪音一覧（曲一覧の中、公開版にも出す）：今の曲で使っている楽器を並べ、押すとその楽器でドレミファソラシド（8音）を鳴らす。
-   曲の再生中は止めずに重ね、1音を曲の1拍にして次の拍の頭から鳴らす。止まっているときは 0.42 秒ごと。曲ごとの設定は、その楽器を使う最初の曲のものを使う */
+   曲の再生中は止めずに重ね、1音を曲の1拍にして次の拍の頭から鳴らす。止まっているときは 0.42 秒ごと。曲とは別の経路で鳴らすので、曲の切り替わりでも切れない。曲ごとの設定は、その楽器を使う最初の曲のものを使う */
 const TONE_NAMES = { musicbox:'オルゴール', mutedmusicbox:'弱音オルゴール', flue:'笛', feltpiano:'フェルトピアノ', triangle:'分散和音',
   pianoacc:'ピアノ（伴奏）', softpiano:'柔らかいピアノ', pad:'パッド', padpiano:'ピアノ（和音）', bass:'ベース', basspiano:'ピアノ（低音）',
   bell:'ベル', strings:'弦' };
@@ -2238,12 +2241,40 @@ function playToneScale(name, track){
   } else {
     stopAllAudio();
     t0 = ctx.currentTime + .12;
-    masterGain.gain.cancelScheduledValues(ctx.currentTime);
-    masterGain.gain.setValueAtTime(muted ? 0 : volume, t0 - .05);
   }
-  previewTrack = track;
+  const bus = ensureToneBus(), now = ctx.currentTime, vol = muted ? 0 : volume;
+  /* 前に押した音階が鳴っていたら止める（瞬断するとクリックノイズになるので短く絞ってから） */
+  if(toneNodes.length){
+    bus.gain.gain.cancelScheduledValues(now); bus.gain.gain.setValueAtTime(bus.gain.gain.value, now);
+    bus.gain.gain.linearRampToValueAtTime(.0001, now + .04);
+    for(const nd of toneNodes){ try{ nd.stop(now + .045); }catch(e){} }
+    toneNodes = [];
+    bus.gain.gain.setValueAtTime(vol, now + .05);
+    t0 = Math.max(t0, now + .06);
+  } else { bus.gain.gain.cancelScheduledValues(now); bus.gain.gain.setValueAtTime(vol, now); }
+  /* 曲とは別の経路（toneBus）で鳴らす：曲の切り替わりで曲の音を止めても、音階は切れない */
+  const saved = [masterGain, reverbConvolver, reverbIn, reverbWet];
+  masterGain = bus.gain; reverbConvolver = bus.conv; reverbIn = bus.rin; reverbWet = bus.wet;
+  previewTrack = track; toneBusOn = true;
   try{ [0, 2, 4, 5, 7, 9, 11, 12].forEach((n, k)=>fn(t0 + k*step, base + n, step*.95, vel)); }
-  finally{ previewTrack = null; }
+  finally{ previewTrack = null; toneBusOn = false; [masterGain, reverbConvolver, reverbIn, reverbWet] = saved; }
+}
+/* 音一覧の経路：曲と同じコンプレッサーへ、同じ音量で出す。残響とピアノの響板も曲とは別に持つ（曲の停止で一緒に絞られないように） */
+function ensureToneBus(){
+  if(toneBus) return toneBus;
+  const ctx = audioCtx, gain = ctx.createGain();
+  gain.gain.value = muted ? 0 : volume; gain.connect(masterCompressor);
+  let conv = null, wet = null, rin = null;
+  if(reverbConvolver){
+    conv = ctx.createConvolver(); conv.buffer = reverbConvolver.buffer;
+    wet = ctx.createGain(); wet.gain.value = reverbWet.gain.value; conv.connect(wet); wet.connect(gain);
+    rin = conv;
+    if(reverbIn !== reverbConvolver){
+      rin = ctx.createBiquadFilter(); rin.type = reverbIn.type; rin.frequency.value = reverbIn.frequency.value; rin.Q.value = reverbIn.Q.value; rin.connect(conv);
+    }
+  }
+  toneBus = { gain, conv, wet, rin, sends:{}, bodies:new WeakMap() };
+  return toneBus;
 }
 function renderToneGrid(){
   toneGrid.innerHTML = '';
