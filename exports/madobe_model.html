@@ -1523,7 +1523,7 @@ function playPadChoir(startTime, midi, dur, vel){
 const PADS_GAIN = { strings:.082, choir:.51, piano:.19 };   // 今のパッドと同じ大きさになる値（書き出して測って決める）
 // パッドをピアノで（?padv=piano で聞き比べ中）：伴奏と同じピアノの音で、和音をペダルを踏んだように伸ばす（離した後の消え方を長く）。
 // 伴奏と同じ楽器なので浮かない。パッドの強さ（25〜30）は弱いので、倍音の少ない柔らかい音になる
-function playPadPiano(startTime, midi, dur, vel){ return playPianoAccNote(startTime, midi, dur, vel, { gain:PADS_GAIN.piano, damp:.3 }); }
+function playPadPiano(startTime, midi, dur, vel){ return playPianoAccNote(startTime, midi, dur, vel, { gain:PADS_GAIN.piano*(PIANO_V4 ? .75 : 1), damp:.3 }); }   // v4（a＋b）でも前の版と同じ大きさ
 function playPadNote(startTime, midi, dur, vel){
   if(PADV === 'piano' && !(song.track && song.track.keepSynth) && !(CAP.offline && CAP.track && CAP.track.keepSynth)) return playPadPiano(startTime, midi, dur, vel);
   if(PADV === 'strings') return playPadStrings(startTime, midi, dur, vel);
@@ -1580,7 +1580,7 @@ function playPadNote2(startTime, midi, dur, vel){
 }
 // ベースの別案（?bassv=piano／sine で聞き比べ中）：piano＝ピアノの左手（伴奏と同じピアノ）、sine＝倍音を足さない元の正弦波（acc2 の倍音を外す）
 const BASSV = DEV ? (PARAMS.get('bassv') || '') : '';
-function playBassPiano(startTime, midi, dur, vel){ return playPianoAccNote(startTime, midi, dur, vel, { gain:BASS_PIANO_GAIN*(PIANO_V4 ? 1.4 : 1), damp:.09 }); }   // v4 は響板に低音を通さないぶん小さくなるので戻す
+function playBassPiano(startTime, midi, dur, vel){ return playPianoAccNote(startTime, midi, dur, vel, { gain:BASS_PIANO_GAIN*(PIANO_V4 ? 1.08 : 1), damp:.09 }); }   // v4（a＋b）でも前の版と同じ大きさになる係数（書き出して測った）
 const BASS_PIANO_GAIN = .146;   // 今のベースと同じ大きさになる値（書き出して測って決める）
 function playBassNote(startTime, midi, dur, vel){
   if(BASSV === 'piano') return playBassPiano(startTime, midi, dur, vel);
@@ -1697,17 +1697,17 @@ function playStringsNote(startTime, midi, dur, vel){
    ・どの倍音も鳴った瞬間が最大で、すぐ減り始める。減り方は周波数で決め、高い音・高い倍音ほど早く消える。押している間の平らな部分は作らない。離したらダンパーで消える
    ・下の3本の倍音に、わずかに（1Hz 前後）ずらした音を重ねてうなりを出す（実物は1音に弦が2〜3本あり、わずかにずれている）
    ・倍音はわずかに高めにずらす（弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
-/* アコースティックピアノ寄り（?pianov=4 で聞き比べ中）：電子ピアノっぽいと言われた（2026-11-04）。足すもの：
+/* アコースティックピアノ寄り（v4。既定）：電子ピアノっぽいと言われた（2026-11-04）。足すもの：
    ・響板：弦の音を、細かい共鳴がびっしり並んだ短い響き（木の板の鳴り、約 0.35 秒）に通して混ぜる。全部のピアノで1つを共有する（畳み込みは共有してよい）
    ・1音に弦3本：基音〜4倍音を、わずかに（±0.7 セント）ずらした3本で鳴らし、減り方も少しずつ変える（音の太さと二段の減衰）
    ・倍音を 7 本 → 12 本
    ・音の位置：低い音は左、高い音は右（弾き手の位置で聞くピアノ） */
-const PIANO_V4 = DEV && PARAMS.get('pianov') === '4', PIANO_V4_GAIN = 1;
-/* v4 で残った「響きが高い（電子音っぽい）」の原因探し（?pfix=a,b,c で一つずつ入れて聞き比べ中）
+const PIANO_V4 = !(DEV && PARAMS.get('pianov') === '3'), PIANO_V4_GAIN = 1.6;   // 既定（2026-11-04 にユーザーが a＋b と一緒に採用）。?pianov=3 で前の版。大きさは前の版と揃えた（書き出して測った）
+/* v4 で残った「響きが高い（電子音っぽい）」の対策。a＋b を既定に採用（c の打鍵を低くする案は不採用）
    a：響板を暗く（共鳴を 120〜2000Hz 寄りに、高い山ほど弱く早く消える）
    b：倍音を本物の形に（高い倍音ほど急に弱く、ハンマーの打点（弦の約 1/8）で 8 倍音付近が消える）
    c：打鍵の音を低く（「チッ」→「コトッ」。帯域を 250〜900Hz に） */
-const PFIX = new Set(DEV ? (PARAMS.get('pfix') || '').split(',') : []);
+const PFIX = new Set(DEV && PARAMS.has('pfix') ? PARAMS.get('pfix').split(',') : ['a', 'b']);   // 既定は a＋b（ユーザーが採用：電子音っぽさが薄くなった）。?pfix= で組み合わせを変えられる
 /* ピアノを少し離れた所に（?pdist=1 で聞き比べ中）：v4 は至近距離にあるようで疲れる（ユーザーの指摘）。
    遠くの音は、直接の音が小さく残響が多く、高い音が空気と部屋に吸われて柔らかく、左右の広がりが狭い。それに合わせる：
    直接の音 0.85 → 0.55、残響へ送る量 0.5 → 1.0、3kHz から上を 5dB 下げる、左右の広がり ±0.45 → ±0.2 */
