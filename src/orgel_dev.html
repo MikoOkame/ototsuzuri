@@ -1702,6 +1702,10 @@ const PIANO_V4 = DEV && PARAMS.get('pianov') === '4', PIANO_V4_GAIN = 1;
    b：倍音を本物の形に（高い倍音ほど急に弱く、ハンマーの打点（弦の約 1/8）で 8 倍音付近が消える）
    c：打鍵の音を低く（「チッ」→「コトッ」。帯域を 250〜900Hz に） */
 const PFIX = new Set(DEV ? (PARAMS.get('pfix') || '').split(',') : []);
+/* ピアノを少し離れた所に（?pdist=1 で聞き比べ中）：v4 は至近距離にあるようで疲れる（ユーザーの指摘）。
+   遠くの音は、直接の音が小さく残響が多く、高い音が空気と部屋に吸われて柔らかく、左右の広がりが狭い。それに合わせる：
+   直接の音 0.85 → 0.55、残響へ送る量 0.5 → 1.0、3kHz から上を 5dB 下げる、左右の広がり ±0.45 → ±0.2 */
+const PDIST = DEV && PARAMS.get('pdist') === '1';
 const pianoBodies = new WeakMap();
 function pianoBody(ctx){
   if(pianoBodies.has(ctx)) return pianoBodies.get(ctx);
@@ -1748,10 +1752,14 @@ function playPianoAccNote(startTime, midi, dur, vel, opt){
   else g.gain.setTargetAtTime(.0001, end, damp);   // 離したら：ダンパーで消える（伴奏は 0.07。0.1 では静かな部屋で間延びして聞こえた）
   const parts = [g];
   if(PIANO_V4){
-    const pn = ctx.createStereoPanner(); pn.pan.value = clampNum((midi - 60)/36, -.45, .45);   // 低い音は左、高い音は右
-    const dry = ctx.createGain(); dry.gain.value = .85*PIANO_V4_GAIN;
+    const W = PDIST ? .2 : .45;
+    const pn = ctx.createStereoPanner(); pn.pan.value = clampNum((midi - 60)/36, -W, W);   // 低い音は左、高い音は右
+    const dry = ctx.createGain(); dry.gain.value = (PDIST ? .55 : .85)*PIANO_V4_GAIN;
     const wet = ctx.createGain(); wet.gain.value = PIANO_V4_GAIN;
-    g.connect(pn); pn.connect(dry); dry.connect(masterGain); sendToReverb(dry, .5);
+    let src = pn;
+    if(PDIST){ const sh = ctx.createBiquadFilter(); sh.type = 'highshelf'; sh.frequency.value = 3000; sh.gain.value = -5; g.connect(sh); sh.connect(pn); parts.push(sh); }
+    else g.connect(pn);
+    pn.connect(dry); dry.connect(masterGain); sendToReverb(dry, PDIST ? 1 : .5);
     const whp = ctx.createBiquadFilter(); whp.type = 'highpass'; whp.frequency.value = 150; whp.Q.value = .7;   // 響板に低音は通さない（膨らむ）
     pn.connect(whp); whp.connect(wet); wet.connect(pianoBody(ctx).conv);
     parts.push(pn, dry, wet, whp);
