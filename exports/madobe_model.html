@@ -1386,10 +1386,10 @@ const MB_HI_HZ = 1400, MB_HI = PARAMS.get('mbhi') !== '0';
    ・ピンが歯を弾く「ピッ」：雑音の粒（ゼンマイのカチッと同じバッファ）を高めの帯域に通して 5ms ほど
    ・高い音の抑え（MB_HI_HZ）は上の音ほど強く効かせる */
 const MB_TONE = PARAMS.get('tone') === '1' ? 1 : 2;
-/* オルゴールの鋭さを柔らかく（?mbsoft=1／2 で聞き比べ中）。鋭さの元は、弾いた瞬間の 6.27 倍の音・ピンの雑音・3倍の音・立ち上がりの速さ。
+/* オルゴールの鋭さを柔らかく（既定は 2。?mbsoft=0／1 で聞き比べられる）。鋭さの元は、弾いた瞬間の 6.27 倍の音・ピンの雑音・3倍の音・立ち上がりの速さ。
    1：6.27 倍 0.3 → 0.15・ピンの雑音を半分にして帯域を下げる・立ち上がり 6 → 9ms
    2：さらに 6.27 倍 0.08・ピンの雑音 1/4・3倍の音を 0.7 倍・立ち上がり 12ms・4kHz から上をなだらかに下げる */
-const MBSOFT = DEV ? (parseInt(PARAMS.get('mbsoft')) || 0) : 0;
+const MBSOFT = DEV && PARAMS.has('mbsoft') ? (parseInt(PARAMS.get('mbsoft')) || 0) : 2;   // 既定 2（2026-11-04 にユーザーが採用）。?mbsoft=0 で前の鋭さ
 function playMusicBoxNote2(startTime, midi, dur, vel){
   const ctx = audioCtx, freq = midiToFreq(midi);
   const hi = MB_HI && freq > MB_HI_HZ ? MB_HI_HZ/freq : 1;
