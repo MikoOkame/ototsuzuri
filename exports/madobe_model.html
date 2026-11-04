@@ -1500,8 +1500,12 @@ function playPadChoir(startTime, midi, dur, vel){
   const first = padVoices(ctx, freq, startTime, end, [[-9, -.5], [0, 0], [8, .5]], { rate:4.8, cents:10 }, sum, parts);
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
-const PADS_GAIN = { strings:.082, choir:.51 };   // 今のパッドと同じ大きさになる値（書き出して測って決める）
+const PADS_GAIN = { strings:.082, choir:.51, piano:.19 };   // 今のパッドと同じ大きさになる値（書き出して測って決める）
+// パッドをピアノで（?padv=piano で聞き比べ中）：伴奏と同じピアノの音で、和音をペダルを踏んだように伸ばす（離した後の消え方を長く）。
+// 伴奏と同じ楽器なので浮かない。パッドの強さ（25〜30）は弱いので、倍音の少ない柔らかい音になる
+function playPadPiano(startTime, midi, dur, vel){ return playPianoAccNote(startTime, midi, dur, vel, { gain:PADS_GAIN.piano, damp:.3 }); }
 function playPadNote(startTime, midi, dur, vel){
+  if(PADV === 'piano') return playPadPiano(startTime, midi, dur, vel);
   if(PADV === 'strings') return playPadStrings(startTime, midi, dur, vel);
   if(PADV === 'choir') return playPadChoir(startTime, midi, dur, vel);
   if(MIX_FX.has('pad')) return playPadNote2(startTime, midi, dur, vel);
@@ -1668,19 +1672,20 @@ function playStringsNote(startTime, midi, dur, vel){
    ・どの倍音も鳴った瞬間が最大で、すぐ減り始める。減り方は周波数で決め、高い音・高い倍音ほど早く消える。押している間の平らな部分は作らない。離したらダンパーで消える
    ・下の3本の倍音に、わずかに（1Hz 前後）ずらした音を重ねてうなりを出す（実物は1音に弦が2〜3本あり、わずかにずれている）
    ・倍音はわずかに高めにずらす（弦の硬さによる伸び。f_n = n f √(1 + B n²)、B = 0.0004） */
-function playPianoAccNote(startTime, midi, dur, vel){
+function playPianoAccNote(startTime, midi, dur, vel, opt){
   // 3版目（2026-11-04）。2版目は低い音が「ファーン」と伸びてパッドのよう、高い音もピアノに聞こえなかった（ユーザーの指摘）。
   //  ・二段の減衰：叩いた直後の 0.1〜0.2 秒で大きく減り（高い倍音ほど深く）、残りの小さな響きだけが周波数に応じて長く残る
   //  ・ハンマーの打音：フェルトが弦を叩く短い「コッ」（雑音の粒を音の高さに応じた帯域に通す）。高い音ほど目立つ
   //  ・弦の硬さによる倍音の伸び B は高い音ほど大きく（C3 で 0.00015、C6 で 0.0012）
   //  ・うなりは2・3倍音だけに弱く（基音に重ねるとパッドのように聞こえた）
   const ctx = audioCtx, freq = midiToFreq(midi), v = clampNum(vel/127, .05, 1);
-  const peak = v*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .003;
-  const end = startTime + Math.max(dur, .25), stopAt = end + .4;
+  const peak = opt ? v*opt.gain : v*.22*(ACC2 ? 1.6 : 1)*PIANO_ACC_GAIN, attack = .003;
+  const damp = opt ? opt.damp : .07;
+  const end = startTime + Math.max(dur, .25), stopAt = end + damp*6;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0, startTime);
   g.gain.linearRampToValueAtTime(peak, startTime + attack);
-  g.gain.setTargetAtTime(.0001, end, .07);   // 離したら：ダンパーで消える（0.1 では静かな部屋で間延びして聞こえた）
+  g.gain.setTargetAtTime(.0001, end, damp);   // 離したら：ダンパーで消える（伴奏は 0.07。0.1 では静かな部屋で間延びして聞こえた）
   g.connect(masterGain); sendToReverb(g, .5);
   const parts = [g];
   let first = null;
