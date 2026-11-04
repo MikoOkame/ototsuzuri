@@ -1697,13 +1697,21 @@ function playStringsNote(startTime, midi, dur, vel){
    ・倍音を 7 本 → 12 本
    ・音の位置：低い音は左、高い音は右（弾き手の位置で聞くピアノ） */
 const PIANO_V4 = DEV && PARAMS.get('pianov') === '4', PIANO_V4_GAIN = 1;
+/* v4 で残った「響きが高い（電子音っぽい）」の原因探し（?pfix=a,b,c で一つずつ入れて聞き比べ中）
+   a：響板を暗く（共鳴を 120〜2000Hz 寄りに、高い山ほど弱く早く消える）
+   b：倍音を本物の形に（高い倍音ほど急に弱く、ハンマーの打点（弦の約 1/8）で 8 倍音付近が消える）
+   c：打鍵の音を低く（「チッ」→「コトッ」。帯域を 250〜900Hz に） */
+const PFIX = new Set(DEV ? (PARAMS.get('pfix') || '').split(',') : []);
 const pianoBodies = new WeakMap();
 function pianoBody(ctx){
   if(pianoBodies.has(ctx)) return pianoBodies.get(ctx);
   const rate = ctx.sampleRate, len = Math.floor(rate*.35), ir = ctx.createBuffer(2, len, rate);
   let seed = 7; const rnd = ()=>{ seed = (seed*16807) % 2147483647; return seed/2147483647; };   // 毎回同じ響板
   const modes = [];
-  for(let k=0; k<120; k++){ const f = 120*Math.pow(6000/120, rnd()); modes.push([f, .015 + .08*rnd(), rnd()*2 - 1, rnd()*6.28]); }   // 低い山を強くしすぎない（低音が膨らんだ）
+  for(let k=0; k<120; k++){
+    if(PFIX.has('a')){ const f = 120*Math.pow(4000/120, Math.pow(rnd(), 1.6)); modes.push([f, (.02 + .07*rnd())*Math.pow(400/Math.max(f, 400), .6), (rnd()*2 - 1)/(1 + f/1500), rnd()*6.28]); }
+    else { const f = 120*Math.pow(6000/120, rnd()); modes.push([f, .015 + .08*rnd(), rnd()*2 - 1, rnd()*6.28]); }   // 低い山を強くしすぎない（低音が膨らんだ）
+  }
   for(let ch=0; ch<2; ch++){
     const d = ir.getChannelData(ch); let e = 0;
     for(const [f, tau, a, ph] of modes){
@@ -1752,7 +1760,10 @@ function playPianoAccNote(startTime, midi, dur, vel, opt){
   const B = .00015*Math.pow(2, (midi - 48)/12), tilt = 1.3 - .5*v;
   for(let n=1; n<=(PIANO_V4 ? 12 : 7); n++){
     const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 9000) break;
-    const amp = Math.pow(n, -tilt)/(1 + Math.pow(f/2500, 2));
+    let amp = Math.pow(n, -tilt)/(1 + Math.pow(f/2500, 2));
+    if(PFIX.has('b')){   // 高い倍音ほど急に弱く（1.2kHz から上を2乗で）、打点 1/8 による 8 倍音付近のくぼみ
+      amp = Math.pow(n, -tilt - .35)/(1 + Math.pow(f/1200, 2))*(.25 + .75*Math.abs(Math.sin(Math.PI*n/8)));
+    }
     if(amp < .004) continue;
     const keep = n === 1 ? .55 : Math.max(.12, .4 - .05*n);       // 一段目のあとに残る割合（高い倍音ほど深く減る）
     const fast = .12/(1 + .25*(n - 1));                            // 一段目の速さ（秒）
@@ -1773,8 +1784,8 @@ function playPianoAccNote(startTime, midi, dur, vel, opt){
   }
   // ハンマーの打音：音の高さに応じた帯域（低い音は 600Hz 前後、高い音は 3kHz 前後）、20ms ほど
   const nz = ctx.createBufferSource(); nz.buffer = windNoise(ctx);
-  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.min(3200, 300 + freq*2.2); bp.Q.value = .9;
-  const ng = ctx.createGain(), nv = .5*v*(.5 + .5*Math.min(1, freq/880));   // 高い音ほど打音を強めに
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = PFIX.has('c') ? Math.min(900, 250 + freq*.6) : Math.min(3200, 300 + freq*2.2); bp.Q.value = .9;
+  const ng = ctx.createGain(), nv = (PFIX.has('c') ? .7 : .5)*v*(.5 + .5*Math.min(1, freq/880));   // 高い音ほど打音を強めに
   ng.gain.setValueAtTime(.0001, startTime);
   ng.gain.exponentialRampToValueAtTime(nv, startTime + .0015);
   ng.gain.exponentialRampToValueAtTime(.0001, startTime + .025);
