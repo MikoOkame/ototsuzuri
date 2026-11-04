@@ -1200,6 +1200,8 @@ const TRACKS = [{"id":"hajimari00","title":"はじまりのワルツ","subtitle"
    旋律→melody（オルゴール）／ピアノの伴奏（comp）→arp／ベース→bass。ドラムは外す。強さは既存の曲の平均に合わせた係数（melody 1.03・1.09、arp 0.84・0.94、bass 0.57・0.58）。
    ?ngoct=12 で旋律だけ1オクターブ上げる（聞き比べ用。オルゴールらしい高さにするかをユーザーが決める） */
 // ?chessacc=gain：2曲の伴奏だけさらに大きく（分散和音の強さ 1.6 倍・ベース 1.5 倍）。?chessacc=oct：伴奏の和音を1オクターブ上げる（電車の騒音より上の帯域へ）。?chessacc=both：1オクターブ上げて、分散和音 1.3 倍・ベース 1.5 倍。?chessacc=piano：高さはそのままで、伴奏をピアノ寄りの倍音の多い音色（pianoacc）に。聞き比べ用
+// ?omoide=soft：おもいでのワルツの分散和音を柔らかいピアノ（softpiano）に（聞き比べ用。?pianoall より優先）
+if(PARAMS.get('omoide') === 'soft') for(const t of TRACKS) if(t.id === 'track07') t.instruments = Object.assign({}, t.instruments, { arp:'softpiano' });
 // ?pianoall=1：ほかの曲の分散和音（arp）にも、ピアノ寄りの伴奏（pianoacc）を当てる（聞き比べ用）
 if(PARAMS.get('pianoall') === '1') for(const t of TRACKS) if(!t.keepSynth && !(t.instruments && t.instruments.arp)) t.instruments = Object.assign({}, t.instruments, { arp:'pianoacc' });
 if(PARAMS.has('chessacc')){
@@ -1725,8 +1727,47 @@ function playPianoAccNote(startTime, midi, dur, vel, opt){
   first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
 }
 const PIANO_ACC_GAIN = .48;   // 伴奏全体の大きさを前の版と揃える係数（書き出して測って決める）
+/* 柔らかいピアノ（softpiano）：今までの伴奏の音（正弦波＋2倍音、譜面の長さ×1.1＋0.15 秒かけて消える）と、ピアノ寄りの伴奏の中間。
+   おもいでのワルツ用（譜面は今までの音の長さを前提に書かれている。ピアノのように二段で深く減ると、スタッカートに聞こえた）。
+   ・消え方は今までの音と同じ（全体の包絡）。一段目の深い減りは無い
+   ・倍音は 2〜4 倍を少しだけ（ピアノより少なく、今までの音より多い）。高い倍音ほどやや早く弱まる。わずかに高めにずらす
+   ・ハンマーの打音をごく弱く */
+function playSoftPianoNote(startTime, midi, dur, vel){
+  const ctx = audioCtx, freq = midiToFreq(midi), v = clampNum(vel/127, .05, 1);
+  const peak = v*.22*(ACC2 ? 1.6 : 1)*SOFTPIANO_GAIN, attack = .006, R = Math.min(dur*1.1 + .15, 1);
+  const stopAt = startTime + attack + R + .05;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(.0001, startTime);
+  g.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+  g.gain.exponentialRampToValueAtTime(.0001, startTime + attack + R);
+  g.connect(masterGain); sendToReverb(g, .5);
+  const parts = [g];
+  let first = null;
+  const B = .00015*Math.pow(2, (midi - 48)/12);
+  for(const [n, a] of [[1, 1], [2, .3], [3, .12], [4, .05]]){
+    const f = freq*n*Math.sqrt(1 + B*n*n); if(f > 9000) break;
+    const amp = a/(1 + Math.pow(f/2500, 2));
+    const o = trackNode(ctx.createOscillator()); o.type = 'sine'; o.frequency.value = f;
+    const pg = ctx.createGain();
+    pg.gain.setValueAtTime(amp, startTime);
+    if(n > 1) pg.gain.setTargetAtTime(amp*.4, startTime + attack, R/(1 + .6*n));   // 高い倍音ほどやや早く弱まる（深くは減らさない）
+    o.connect(pg); pg.connect(g); parts.push(pg);
+    o.start(startTime); o.stop(stopAt);
+    if(!first) first = o;
+  }
+  const nz = ctx.createBufferSource(); nz.buffer = windNoise(ctx);
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.min(3200, 300 + freq*2.2); bp.Q.value = .9;
+  const ng = ctx.createGain(), nv = .18*v;
+  ng.gain.setValueAtTime(.0001, startTime);
+  ng.gain.exponentialRampToValueAtTime(nv, startTime + .0015);
+  ng.gain.exponentialRampToValueAtTime(.0001, startTime + .02);
+  nz.connect(bp); bp.connect(ng); ng.connect(g); parts.push(bp, ng);
+  nz.start(startTime, Math.random()*.03, .025); trackNode(nz);
+  first.addEventListener('ended', ()=>{ parts.forEach(x=>x.disconnect()); });
+}
+const SOFTPIANO_GAIN = 1;   // 今までの伴奏の音と同じ大きさになる値（書き出して測って決める）
 const INSTRUMENTS = { musicbox:MB_TONE === 2 ? playMusicBoxNote2 : playMusicBoxNote, triangle:playTriangleNote, pad:playPadNote, bass:playBassNote,
-  flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote };
+  flue:playFlueNote, feltpiano:playFeltPianoNote, mutedmusicbox:playMutedMusicBoxNote, bell:playBellNote, strings:playStringsNote, pianoacc:playPianoAccNote, softpiano:playSoftPianoNote };
 const DEFAULT_INSTRUMENTS = { melody:'musicbox', arp:'triangle', pad:'pad', bass:'bass', bell:'bell', strings:'strings' };
 const PARTS = ['melody','arp','pad','bass','bell','strings'];
 function trackInstruments(track){ return Object.assign({}, DEFAULT_INSTRUMENTS, track.instruments || {}); }
