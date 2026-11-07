@@ -354,6 +354,7 @@ const KEYS = [
     hemiSky:0x6c72b8, hemiGround:0x2c2648, hemiI:.9, sunColor:0xb7c3ff, sunI:.6,
     stars:1, inLight:0x4a4864, ground:0x4a4878, glass:0x363566 },
 ];
+const _sheerL = new THREE.Color();
 const COLOR_KEYS = ['skyTop','skyBot','glow','fog','seaDeep','seaLight','cloud','hemiSky','hemiGround','sunColor','inLight','ground','glass'];
 const NUM_KEYS = ['hemiI','sunI','stars'];
 function makePal(src){
@@ -1148,12 +1149,30 @@ for(let k=0;k<7;k++){
   scene.add(lf);
 }
 /* ボトルメール：まっすぐな円柱2つ（胴と首）。透明感のある薄水色。中に巻いた手紙、口に薄い色のコルク */
-const glassMat = inToon(0xbfe6ee, { transparent:true, opacity:.38, depthWrite:false });
+/* 半透明の物（瓶・カーテン）の色の出し方（2026-11-07 比較中。?sheer=0 今まで／1 澄ませる／2 澄ませて光を通す）
+   0：ほかの室内の物と同じく、時間帯の明るさ inLight をそのまま掛ける（昼でも約7割に沈み、灰色がかる）
+   1：inLight を白へ半分寄せて掛ける（暗さは時間帯に合わせつつ、色を濁らせない）。瓶の中に輪郭線の暗い殻が透けないようにする
+   2：1 に加え、外の光が透ける分を自分の色で少し光らせる（夜は弱める）
+   3：2 の光らせ方を強くする（夕方の暖かい光に色が負けず、水色が水色のまま残る） */
+const SHEER = DEV && PARAMS.has('sheer') ? (parseInt(PARAMS.get('sheer')) || 0) : 0;
+const sheerMats = [];
+function sheerToon(color, extra){ const m = inToon(color, extra); if(SHEER >= 1){ m.userData.sheer = true; sheerMats.push(m); } return m; }
+const glassMat = sheerToon(0xbfe6ee, { transparent:true, opacity:.38, depthWrite:false });
+/* 瓶の輪郭線：ガラスが描かれた所（ステンシル 1）には描かない。外側にはみ出した縁だけが線として残る */
+if(SHEER >= 1) Object.assign(glassMat, { stencilWrite:true, stencilRef:1, stencilFunc:THREE.AlwaysStencilFunc, stencilZPass:THREE.ReplaceStencilOp });
+function glassOutline(mesh, t){
+  const o = addOutline(mesh, t, OUT_IN);
+  if(SHEER >= 1){
+    o.material = new THREE.MeshBasicMaterial({ color:OUT_IN, side:THREE.BackSide, transparent:true,
+      stencilWrite:true, stencilRef:1, stencilFunc:THREE.NotEqualStencilFunc });
+    o.renderOrder = 3;
+  }
+}
 const BODY_R = .05, BODY_H = .17, NECK_R = .02, NECK_H = .055;
 const bottle = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, BODY_H, 20), glassMat);
-bottle.position.set(BOTTLE_X, SILL_TOP + BODY_H/2, SMALL_Z); bottle.renderOrder = 2; scene.add(bottle); addOutline(bottle, .006, OUT_IN);
+bottle.position.set(BOTTLE_X, SILL_TOP + BODY_H/2, SMALL_Z); bottle.renderOrder = 2; scene.add(bottle); glassOutline(bottle, .006);
 const bneck = new THREE.Mesh(new THREE.CylinderGeometry(NECK_R, NECK_R, NECK_H, 14), glassMat);
-bneck.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H/2, SMALL_Z); bneck.renderOrder = 2; scene.add(bneck); addOutline(bneck, .004, OUT_IN);
+bneck.position.set(BOTTLE_X, SILL_TOP + BODY_H + NECK_H/2, SMALL_Z); bneck.renderOrder = 2; scene.add(bneck); glassOutline(bneck, .004);
 // 中の手紙：巻いた紙（生成り）に紐（赤茶）。胴にはみ出さない大きさで斜めに入れ、底に当てる
 //   幅 = 長さ×sin傾き + 直径×cos傾き ≤ 胴の内径、高さ = 長さ×cos傾き + 直径×sin傾き ≤ 胴の内側の高さ
 const LT_R = .02, LT_L = .15, LT_TILT = .3;
@@ -1193,7 +1212,7 @@ function casement(sign){
 casement(-1); casement(1);
 
 /* カーテン */
-const curtainMat = inToon(0xf4ecf6, { transparent:true, opacity:.8, side:THREE.DoubleSide });
+const curtainMat = sheerToon(0xbfe3f2, { transparent:true, opacity:.8, side:THREE.DoubleSide });   // 水色（2026-11-07 ユーザーの指定。前は 0xf4ecf6 の薄い藤色）
 const curtains = [];
 [-1, 1].forEach(sign=>{
   const w = .85, h = 2.6;
@@ -3739,6 +3758,11 @@ function applyTime(t){
 
   tinted.forEach(o=>o.m.color.copy(p[o.key]));
   interior.forEach(o=>o.m.color.copy(o.base).multiply(p.inLight));
+  if(SHEER >= 1){
+    _sheerL.setRGB(1, 1, 1).lerp(p.inLight, .5);
+    const glow = SHEER >= 3 ? .38*(sunUp*.75 + .25) + .1*room : SHEER >= 2 ? .16*(sunUp*.8 + .2) + .08*room : 0;
+    sheerMats.forEach(m=>{ m.color.copy(m.userData.base).multiply(_sheerL); if(glow) m.emissive.copy(m.userData.base).multiplyScalar(glow); });
+  }
   const lift = BOX_LIFT*(sunUp*.5 + .5 + room);   // 昼は外光、夜は部屋の灯りの照り返し
   const boxNight = BOX_NIGHT*(1 - sunUp)*(1 - room);
   boxInside.forEach(m=>m.emissive.copy(m.color).multiplyScalar(lift).add(_boxC.copy(m.userData.base).multiplyScalar(boxNight)));
