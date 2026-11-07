@@ -1149,12 +1149,12 @@ for(let k=0;k<7;k++){
   scene.add(lf);
 }
 /* ボトルメール：まっすぐな円柱2つ（胴と首）。透明感のある薄水色。中に巻いた手紙、口に薄い色のコルク */
-/* 半透明の物（瓶・カーテン）の色の出し方（2026-11-07 比較中。?sheer=0 今まで／1 澄ませる／2 澄ませて光を通す）
+/* 半透明の物（瓶・カーテン）の色の出し方（2026-11-07 に 1 を採用。?sheer=0 今まで／1 澄ませる／2 澄ませて光を通す）
    0：ほかの室内の物と同じく、時間帯の明るさ inLight をそのまま掛ける（昼でも約7割に沈み、灰色がかる）
    1：inLight を白へ半分寄せて掛ける（暗さは時間帯に合わせつつ、色を濁らせない）。瓶の中に輪郭線の暗い殻が透けないようにする
    2：1 に加え、外の光が透ける分を自分の色で少し光らせる（夜は弱める）
    3：2 の光らせ方を強くする（夕方の暖かい光に色が負けず、水色が水色のまま残る） */
-const SHEER = DEV && PARAMS.has('sheer') ? (parseInt(PARAMS.get('sheer')) || 0) : 0;
+const SHEER = DEV && PARAMS.has('sheer') ? (parseInt(PARAMS.get('sheer')) || 0) : 1;   // 既定 1（2026-11-07 にユーザーが採用）
 const sheerMats = [];
 function sheerToon(color, extra){ const m = inToon(color, extra); if(SHEER >= 1){ m.userData.sheer = true; sheerMats.push(m); } return m; }
 const glassMat = sheerToon(0xbfe6ee, { transparent:true, opacity:.38, depthWrite:false });
