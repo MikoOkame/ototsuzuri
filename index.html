@@ -1212,8 +1212,8 @@ function casement(sign){
 casement(-1); casement(1);
 
 /* カーテン */
-const CURTAIN_COL = DEV && PARAMS.has('curtain') ? parseInt(PARAMS.get('curtain'), 16) : 0xbfe3f2;   // ?curtain=bcd8f5 で色を比べる（確認用）
-const curtainMat = sheerToon(CURTAIN_COL, { transparent:true, opacity:.8, side:THREE.DoubleSide });   // 水色（2026-11-07 ユーザーの指定。前は 0xf4ecf6 の薄い藤色）
+const CURTAIN_COL = DEV && PARAMS.has('curtain') ? parseInt(PARAMS.get('curtain'), 16) : 0xa2b7e4;   // 2026-11-07 ユーザーの指定（前は 0xbfe3f2：緑みが強かった）   // ?curtain=bcd8f5 で色を比べる（確認用）
+const curtainMat = sheerToon(CURTAIN_COL, { transparent:true, opacity:.8, side:THREE.DoubleSide });   // 水色（2026-11-07。最初は 0xf4ecf6 の薄い藤色）
 const curtains = [];
 [-1, 1].forEach(sign=>{
   const w = .85, h = 2.6;
