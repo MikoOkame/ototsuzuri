@@ -165,7 +165,7 @@
   - 旋律の高さは元のまま（1オクターブ上げない。ユーザーが決めた。`?ngoct=` は聞き比べ用に残る）。
   - 歌うモーション：テンポが速く（138）、2拍で1周では速すぎた（ユーザーの指摘）。曲ごとの `singBeats`（歌うモーション1周の拍数。既定 2）を 3 にした＝1小節で1周（約1.3秒。はじまりのワルツの 2拍＝1.2秒と同じくらい）。声も1周に1回。音は変わらない。`?singbeats=6` で2小節で1周（約2.6秒）を試せる。
   - 色も決まり、2026-10-30 に公開した（`devOnly` を外した）。全曲リピートの順は、おもいでのワルツのあとにこの2曲。
-- 追加曲 `encore`「The Crown Comes Off 〜無冠の円舞曲〜」（2026-11-21 に追加。**制作版のみ（`devOnly`）**）：Nightingale Chess の Encore（本気のアルタイル）の曲。曲名はユーザーがチェスゲーム側で決めたもの（After Hours 曲 The Crown Stays On＝王冠の影 の対）を英語のまま使う。
+- 追加曲 `encore`「ふたりきりの盤上 〜白と黒の円舞曲〜」（2026-11-21 に追加。**制作版のみ（`devOnly`）**）：Nightingale Chess の Encore（本気のアルタイル）の曲。原曲名 The Crown Comes Off 〜無冠の円舞曲〜（After Hours 曲 The Crown Stays On＝王冠の影 の対）。オルゴール版の曲名はユーザーが決めた（2026-11-21。決まるまでは原曲名のまま入れていた）。
   - 元：`mikookame/nightingale-games` の `claude-chess/bgm/encore.mid`（ゲームに埋め込まれている MIDI と同じ中身であることを確かめた。N が直した旋律とピアノを `compose_encore.py` に書き戻して書き出し直した版）。C minor、3/4・126BPM・48小節・68.57秒。
   - 変換はスポットライトの下で・王冠の影と同じ：melody→melody（オルゴール）／comp→arp（`pianoacc`）／bass→bass（`basspiano`）、drums は外す、`acc` あり、`singBeats` 3。強さは既存の曲の平均（melody 68・arp 47・bass 44）に合う係数。旋律の高さは元のまま（`?ngoct=` の対象に入れた）。同じ変換で王冠の影の元の MIDI（`after_hours.mid`）を変換し直すと、音綴りの中のデータと1音も違わないことを確かめた。
   - 色は仮に `#b5c6e0`（チェスゲームのタイトルで Encore に使っている青）。ユーザーが決めたら `devOnly` を外して公開する。全曲リピートの順は王冠の影のあと。
