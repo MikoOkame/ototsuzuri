@@ -3152,14 +3152,32 @@ function makeBird(idx){
   // 当たり判定：見た目より大きい球
   const hit = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 6), new THREE.MeshBasicMaterial({ visible:false }));
   hit.position.y = .12; hit.userData.bird = bird; model.add(hit); bird.hit = hit;
+  /* モーションの切り替え（2026-11-21 に作り直した）：今の混ざり具合（重み）から、なめらかに（端でゆっくり）移る。
+     前は three の crossFadeTo を使っていたが、あれは「前の動き＝重み1、次＝重み0」から混ぜ始めるので、
+     切り替えの途中でまた切り替えると（歌をやめた同じコマでまた歌い出す、伸びの途中で歌い出す など）、ポーズが一瞬飛んだ */
+  bird.acts = new Set(); bird.blend = new Map();
   bird.play = (name, loop=true, fade=.25)=>{
     const c = clips[name]; if(!c) return null;
     const a = mixer.clipAction(c);
+    const live = o=>bird.acts.has(o) && o.enabled;   // 一度だけの動きは、終わっても最後のポーズで止まったまま混ざっている（isRunning は false になる）
+    const w = live(a) ? a.getEffectiveWeight() : 0;   // まだ混ざっている動きへ戻るときは、その重みから
     a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = !loop;
-    a.reset().play();
-    if(bird.current && bird.current !== a) bird.current.crossFadeTo(a, fade, false);
+    if(w <= .001 || !loop) a.reset();   // 繰り返す動きが混ざったまま戻るときは、時刻を巻き戻さない（巻き戻すとそこで飛ぶ）
+    a.play(); a.setEffectiveWeight(w); bird.acts.add(a);
+    for(const o of bird.acts){
+      const from = o === a ? w : (live(o) ? o.getEffectiveWeight() : 0);
+      bird.blend.set(o, { from, to:o === a ? 1 : 0, t:0, dur:Math.max(fade, 1e-3) });
+    }
     bird.current = a;
     return a;
+  };
+  bird.tickBlend = dt=>{
+    for(const [o, f] of bird.blend){
+      f.t += dt;
+      const k = f.t >= f.dur ? 1 : sstep(0, 1, f.t/f.dur);
+      o.setEffectiveWeight(f.from + (f.to - f.from)*k);
+      if(k >= 1){ bird.blend.delete(o); if(f.to === 0){ o.stop(); bird.acts.delete(o); } }
+    }
   };
   scene.add(model); birds.push(bird);
   return bird;
@@ -3258,7 +3276,7 @@ function beakPos(b, out){
 const MAX_SINGERS = 3;
 const STAND_SEC = 10;          // 夜：立ち上がってから座り直すまで
 const PHRASE_BARS = 4;
-const SING_FADE = .6, SING_FADE_TRACK = 1.2;   // 歌うモーションへの入り方（曲送りのときはさらに緩やかに）
+const SING_FADE = .9, SING_FADE_TRACK = 1.2, SING_OUT_FADE = .8;   // 2026-11-21：歌の入りと終わりをゆっくりに（ユーザーの要望。前は入り .6・終わり .4）   // 歌うモーションへの入り方（曲送りのときはさらに緩やかに）
 const VOICE_KEY = 'ototsuzuri.birdVoice';
 let birdVoice = true;
 try{ const v = localStorage.getItem(VOICE_KEY); if(v !== null) birdVoice = v === '1'; }catch(e){}
@@ -3324,9 +3342,9 @@ function stopSing(b, opts={}){
   b.singing = false;
   if(b.mode === 'hover'){ b.hv.phase = 'fall'; b.hv.t = 0; b.hv.from.copy(b.model.position); return; }
   b.mode = 'perch';
-  if(isDay()){ b.state = ''; b.wait = 0; setAnim(b, 'idle', true, .4); }
+  if(isDay()){ b.state = ''; b.wait = 0; setAnim(b, 'idle', true, SING_OUT_FADE); }
   else if(opts.sit){ sitDown(b); }
-  else { b.seated = false; b.standT = STAND_SEC; setAnim(b, 'idle', true, .4); }
+  else { b.seated = false; b.standT = STAND_SEC; setAnim(b, 'idle', true, SING_OUT_FADE); }
 }
 function sitDown(b){ b.seated = true; b.standT = 0; b.state = 'sit_in'; b.wait = .65; setAnim(b, 'sit_in', false, .3, true); }
 function standUp(b){ b.seated = false; b.standT = STAND_SEC; b.state = 'sit_out'; b.wait = .65; setAnim(b, 'sit_out', false, .3, true); }
@@ -4279,6 +4297,7 @@ function stepFrame(dt, now, noRender){
   for(const b of birds){
     if(b.neck) b.neck.quaternion.copy(b.neckClip);
     if(b.head) b.head.quaternion.copy(b.headClip);
+    b.tickBlend(dt);
     b.mixer.update(dt);
     if(b.neck) b.neckClip.copy(b.neck.quaternion);
     if(b.head) b.headClip.copy(b.head.quaternion);
